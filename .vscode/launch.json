@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "lexer tests",
+            "program": "${workspaceFolder}/zig-out/bin/lexer_tests",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
