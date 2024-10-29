@@ -35,12 +35,38 @@ pub const Lexer = struct {
 
         const ch = self.ch;
         const tok: token.Token = switch (ch.*) {
-            '=' => newToken(token.ASSIGN, ch),
+            '=' => blk: {
+                if (self.peekChar() == '=') {
+                    const start = self.position;
+                    self.readChar();
+                    break :blk token.Token{
+                        ._type = token.EQ,
+                        .literal = self.input[start .. start + 2],
+                    };
+                }
+                break :blk newToken(token.ASSIGN, ch);
+            },
+            '+' => newToken(token.PLUS, ch),
+            '-' => newToken(token.MINUS, ch),
+            '!' => blk: {
+                if (self.peekChar() == '=') {
+                    const start = self.position;
+                    self.readChar();
+                    break :blk token.Token{
+                        ._type = token.NOT_EQ,
+                        .literal = self.input[start .. start + 2],
+                    };
+                }
+                break :blk newToken(token.BANG, ch);
+            },
+            '/' => newToken(token.SLASH, ch),
+            '*' => newToken(token.ASTERISK, ch),
+            '<' => newToken(token.LT, ch),
+            '>' => newToken(token.GT, ch),
             ';' => newToken(token.SEMICOLON, ch),
+            ',' => newToken(token.COMMA, ch),
             '(' => newToken(token.LPAREN, ch),
             ')' => newToken(token.RPAREN, ch),
-            ',' => newToken(token.COMMA, ch),
-            '+' => newToken(token.PLUS, ch),
             '{' => newToken(token.LBRACE, ch),
             '}' => newToken(token.RBRACE, ch),
             0 => token.Token{ ._type = token.EOF, .literal = "" },
@@ -98,6 +124,14 @@ pub const Lexer = struct {
         }
         return self.input[start..self.position];
     }
+
+    fn peekChar(self: *const Lexer) u8 {
+        if (self.read_position >= self.input.len) {
+            return 0;
+        } else {
+            return self.input[self.read_position];
+        }
+    }
 };
 
 test "Test Next Token" {
@@ -110,6 +144,17 @@ test "Test Next Token" {
         \\};
         \\
         \\let result = add(five, ten);
+        \\!-/*5;
+        \\5 < 10 > 5;
+        \\
+        \\if (5 < 10) {
+        \\  return true;
+        \\} else {
+        \\  return false;
+        \\}
+        \\
+        \\10 == 10
+        \\10 != 9
     ;
 
     const expecteds = [_]struct {
@@ -259,6 +304,146 @@ test "Test Next Token" {
         .{
             .expected_type = token.SEMICOLON,
             .expected_literal = ";",
+        },
+        .{
+            .expected_type = token.BANG,
+            .expected_literal = "!",
+        },
+        .{
+            .expected_type = token.MINUS,
+            .expected_literal = "-",
+        },
+        .{
+            .expected_type = token.SLASH,
+            .expected_literal = "/",
+        },
+        .{
+            .expected_type = token.ASTERISK,
+            .expected_literal = "*",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "5",
+        },
+        .{
+            .expected_type = token.SEMICOLON,
+            .expected_literal = ";",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "5",
+        },
+        .{
+            .expected_type = token.LT,
+            .expected_literal = "<",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "10",
+        },
+        .{
+            .expected_type = token.GT,
+            .expected_literal = ">",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "5",
+        },
+        .{
+            .expected_type = token.SEMICOLON,
+            .expected_literal = ";",
+        },
+        .{
+            .expected_type = token.IF,
+            .expected_literal = "if",
+        },
+        .{
+            .expected_type = token.LPAREN,
+            .expected_literal = "(",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "5",
+        },
+        .{
+            .expected_type = token.LT,
+            .expected_literal = "<",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "10",
+        },
+        .{
+            .expected_type = token.RPAREN,
+            .expected_literal = ")",
+        },
+        .{
+            .expected_type = token.LBRACE,
+            .expected_literal = "{",
+        },
+        .{
+            .expected_type = token.RETURN,
+            .expected_literal = "return",
+        },
+        .{
+            .expected_type = token.TRUE,
+            .expected_literal = "true",
+        },
+        .{
+            .expected_type = token.SEMICOLON,
+            .expected_literal = ";",
+        },
+        .{
+            .expected_type = token.RBRACE,
+            .expected_literal = "}",
+        },
+        .{
+            .expected_type = token.ELSE,
+            .expected_literal = "else",
+        },
+        .{
+            .expected_type = token.LBRACE,
+            .expected_literal = "{",
+        },
+        .{
+            .expected_type = token.RETURN,
+            .expected_literal = "return",
+        },
+        .{
+            .expected_type = token.FALSE,
+            .expected_literal = "false",
+        },
+        .{
+            .expected_type = token.SEMICOLON,
+            .expected_literal = ";",
+        },
+        .{
+            .expected_type = token.RBRACE,
+            .expected_literal = "}",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "10",
+        },
+        .{
+            .expected_type = token.EQ,
+            .expected_literal = "==",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "10",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "10",
+        },
+        .{
+            .expected_type = token.NOT_EQ,
+            .expected_literal = "!=",
+        },
+        .{
+            .expected_type = token.INT,
+            .expected_literal = "9",
         },
         .{
             .expected_type = token.EOF,
