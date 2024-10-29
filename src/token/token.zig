@@ -42,3 +42,15 @@ pub const LET = "LET";
 // pub const IF = "IF";
 // pub const ELSE = "ELSE";
 // pub const RETURN = "RETURN";
+
+const keywords = std.StaticStringMap([]const u8).initComptime([_]struct { []const u8, []const u8 }{
+    .{ "fn", FUNCTION },
+    .{ "let", LET },
+});
+
+pub fn lookupIdent(ident: []const u8) TokenType {
+    if (keywords.get(ident)) |tok| {
+        return tok;
+    }
+    return IDENT;
+}
