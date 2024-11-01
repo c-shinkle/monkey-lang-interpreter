@@ -9,7 +9,7 @@ pub const Lexer = struct {
     read_position: usize,
     ch: *const u8,
 
-    fn init(input: []const u8) Lexer {
+    pub fn init(input: []const u8) Lexer {
         var l = Lexer{
             .input = input,
             .position = 0,
@@ -30,11 +30,11 @@ pub const Lexer = struct {
         self.read_position += 1;
     }
 
-    fn nextToken(self: *Lexer) token.Token {
+    pub fn nextToken(self: *Lexer) ?token.Token {
         self.skipWhitespace();
 
         const ch = self.ch;
-        const tok: token.Token = switch (ch.*) {
+        const tok: ?token.Token = switch (ch.*) {
             '=' => blk: {
                 if (self.peekChar() == '=') {
                     const start = self.position;
@@ -69,7 +69,7 @@ pub const Lexer = struct {
             ')' => newToken(token.RPAREN, ch),
             '{' => newToken(token.LBRACE, ch),
             '}' => newToken(token.RBRACE, ch),
-            0 => token.Token{ ._type = token.EOF, .literal = "" },
+            0 => null,
             else => blk: {
                 if (isLetter(ch.*)) {
                     const literal = self.readIdentifier();
@@ -445,18 +445,16 @@ test "Test Next Token" {
             .expected_type = token.INT,
             .expected_literal = "9",
         },
-        .{
-            .expected_type = token.EOF,
-            .expected_literal = "",
-        },
     };
 
     var l = Lexer.init(input);
 
     for (expecteds) |expected| {
-        const tok = l.nextToken();
+        const tok = l.nextToken().?;
 
         try testing.expectEqualStrings(expected.expected_type, tok._type);
         try testing.expectEqualStrings(expected.expected_literal, tok.literal);
     }
+
+    try testing.expectEqual(null, l.nextToken());
 }
