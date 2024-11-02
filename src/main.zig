@@ -8,6 +8,10 @@ pub fn main() !void {
 
     try stdout.print("Hello! This is the Monkey Programming Language!\n", .{});
     try stdout.print("Feel free to type in commands!\n", .{});
+    try bw.flush();
 
     try repl.start(stdout_file, std.io.getStdIn().reader());
+
+    try stdout.print("Bye bye!\n", .{});
+    try bw.flush();
 }

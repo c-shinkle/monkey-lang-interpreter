@@ -2,19 +2,28 @@ const std = @import("std");
 const lexer = @import("lexer");
 const token = @import("token");
 
-pub fn start(stdout_file: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
-    var bw = std.io.bufferedWriter(stdout_file);
+pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
+    var bw = std.io.bufferedWriter(writer);
     const stdout = bw.writer();
+
     var buffer: [1024]u8 = undefined;
+    var fbs: std.io.FixedBufferStream([]u8) = std.io.fixedBufferStream(&buffer);
+    const fbs_writer = fbs.writer();
 
     while (true) {
         try stdout.print(">> ", .{});
         try bw.flush();
 
-        const input = try reader.readUntilDelimiter(&buffer, '\n');
+        try reader.streamUntilDelimiter(fbs_writer, '\n', 1024);
+        const input = fbs.getWritten();
+        if (std.mem.startsWith(u8, input, "exit")) {
+            return;
+        }
+
         var l = lexer.Lexer.init(input);
         while (l.nextToken()) |tok| {
             try stdout.print("Type = \"{s}\" Literal = \"{s}\"\n", .{ tok._type, tok.literal });
         }
+        fbs.reset();
     }
 }

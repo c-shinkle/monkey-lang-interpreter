@@ -35,6 +35,7 @@ pub const Lexer = struct {
 
         const ch = self.ch;
         const tok: ?token.Token = switch (ch.*) {
+            0 => null,
             '=' => blk: {
                 if (self.peekChar() == '=') {
                     const start = self.position;
@@ -69,7 +70,6 @@ pub const Lexer = struct {
             ')' => newToken(token.RPAREN, ch),
             '{' => newToken(token.LBRACE, ch),
             '}' => newToken(token.RBRACE, ch),
-            0 => null,
             else => blk: {
                 if (isLetter(ch.*)) {
                     const literal = self.readIdentifier();
@@ -450,11 +450,13 @@ test "Test Next Token" {
     var l = Lexer.init(input);
 
     for (expecteds) |expected| {
-        const tok = l.nextToken().?;
+        const maybe_token = l.nextToken();
+        try testing.expect(maybe_token != null);
 
+        const tok = maybe_token.?;
         try testing.expectEqualStrings(expected.expected_type, tok._type);
         try testing.expectEqualStrings(expected.expected_literal, tok.literal);
     }
 
-    try testing.expectEqual(null, l.nextToken());
+    try testing.expect(l.nextToken() == null);
 }

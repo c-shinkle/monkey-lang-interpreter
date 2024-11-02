@@ -63,8 +63,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    // exe.root_module.addImport("token", token_module);
-    // exe.root_module.addImport("lexer", lexer_module);
     exe.root_module.addImport("repl", repl_module);
     b.installArtifact(exe);
 
