@@ -15,7 +15,7 @@ pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
 
         try reader.streamUntilDelimiter(fbs_writer, '\n', 1024);
         const input = fbs.getWritten();
-        if (std.mem.startsWith(u8, input, "exit")) {
+        if (std.mem.eql(u8, input, "exit")) {
             return;
         }
 
