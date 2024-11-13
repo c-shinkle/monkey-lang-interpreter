@@ -57,6 +57,61 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const ast_unit_tests = b.addTest(.{
+        .name = "ast_tests",
+        .root_source_file = b.path("src/ast/ast.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ast_unit_tests.root_module.addImport("token", token_module);
+
+    b.installArtifact(ast_unit_tests);
+    const run_ast_unit_tests = b.addRunArtifact(ast_unit_tests);
+    test_step.dependOn(&run_ast_unit_tests.step);
+    const ast_module = b.addModule("token", .{
+        .root_source_file = b.path("src/ast/ast.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{
+            .name = "token",
+            .module = token_module,
+        }},
+    });
+
+    const parser_unit_tests = b.addTest(.{
+        .name = "parser_tests",
+        .root_source_file = b.path("src/parser/parser.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    parser_unit_tests.root_module.addImport("token", token_module);
+    parser_unit_tests.root_module.addImport("lexer", lexer_module);
+    parser_unit_tests.root_module.addImport("ast", ast_module);
+
+    b.installArtifact(parser_unit_tests);
+    const run_parser_unit_tests = b.addRunArtifact(parser_unit_tests);
+    test_step.dependOn(&run_parser_unit_tests.step);
+    const parser_module = b.addModule("token", .{
+        .root_source_file = b.path("src/parser/parser.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{
+                .name = "token",
+                .module = token_module,
+            },
+            .{
+                .name = "lexer",
+                .module = lexer_module,
+            },
+            .{
+                .name = "ast",
+                .module = ast_module,
+            },
+        },
+    });
+    _ = parser_module;
+
     const exe = b.addExecutable(.{
         .name = "monkey-lang-interpreter",
         .root_source_file = b.path("src/main.zig"),
