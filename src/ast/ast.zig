@@ -51,6 +51,18 @@ pub const Expression = union(enum) {
 
 pub const Program = struct {
     statements: []const Statement,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *const Program) void {
+        for (self.statements) |stmt| {
+            switch (stmt) {
+                .let_statement => {
+                    self.allocator.destroy(stmt.let_statement.name);
+                },
+            }
+        }
+        self.allocator.free(self.statements);
+    }
 
     pub fn tokenLiteral(self: *const Program) []const u8 {
         if (self.statements.len > 0) {
@@ -64,7 +76,7 @@ pub const Program = struct {
 pub const LetStatement = struct {
     _token: token.Token,
     name: *const Identifier,
-    value: Expression,
+    value: ?Expression,
 
     pub fn tokenLiteral(self: *const LetStatement) []const u8 {
         return self._token.literal;
@@ -97,6 +109,7 @@ test "ast foo" {
             .name = &identifier,
             .value = Expression{ .identifier = identifier },
         } }},
+        .allocator = testing.allocator,
     };
 
     const node = Node{
