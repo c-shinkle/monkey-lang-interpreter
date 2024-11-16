@@ -28,8 +28,79 @@ const Parser = struct {
         self.peek_token = self.lexer.nextToken();
     }
 
-    fn parseProgram(_: *Parser) ?*ast.Program {
-        return null;
+    fn parseProgram(p: *Parser, allocator: std.mem.Allocator) ast.Program {
+        var list = std.ArrayList(ast.Statement).init(allocator);
+
+        while (p.cur_token != null) {
+            const maybe_statement = p.parseStatement(allocator);
+            if (maybe_statement) |stmt| {
+                list.append(stmt) catch {
+                    @panic("Failed to append to statements ArrayList");
+                };
+            }
+            p.nextToken();
+        }
+        return ast.Program{
+            .statements = list.toOwnedSlice() catch {
+                @panic("Failed toOwnedSlice()");
+            },
+            .allocator = allocator,
+        };
+    }
+
+    fn parseStatement(self: *Parser, allocator: std.mem.Allocator) ?ast.Statement {
+        if (std.mem.eql(u8, token.LET, self.cur_token.?._type)) {
+            const let_statement = self.parseLetStatement(allocator) orelse return null;
+            return ast.Statement{ .let_statement = let_statement };
+        } else {
+            return null;
+        }
+    }
+
+    fn parseLetStatement(self: *Parser, allocator: std.mem.Allocator) ?ast.LetStatement {
+        const let_token = self.cur_token.?;
+
+        if (!self.expectPeek(token.IDENT)) {
+            return null;
+        }
+
+        const name: *ast.Identifier = allocator.create(ast.Identifier) catch {
+            @panic("Failed to allocate ast.Identifier");
+        };
+        name.* = ast.Identifier{
+            ._token = self.cur_token.?,
+            .value = self.cur_token.?.literal,
+        };
+
+        if (!self.expectPeek(token.ASSIGN)) {
+            allocator.destroy(name);
+            return null;
+        }
+
+        // TODO
+
+        while (!self.curTokenIs(token.SEMICOLON)) {
+            self.nextToken();
+        }
+
+        return ast.LetStatement{ ._token = let_token, .name = name, .value = null };
+    }
+
+    fn curTokenIs(self: *const Parser, t: token.TokenType) bool {
+        return std.mem.eql(u8, self.cur_token.?._type, t);
+    }
+
+    fn peekTokenIs(self: *const Parser, t: token.TokenType) bool {
+        return std.mem.eql(u8, self.peek_token.?._type, t);
+    }
+
+    fn expectPeek(self: *Parser, _token: token.TokenType) bool {
+        if (self.peekTokenIs(_token)) {
+            self.nextToken();
+            return true;
+        } else {
+            return false;
+        }
     }
 };
 
@@ -42,10 +113,14 @@ test "Parser tests" {
     var l = Lexer.init(input);
     var parser = Parser.init(&l);
 
-    const program = parser.parseProgram();
-    try testing.expect(program != null);
+    const program = parser.parseProgram(testing.allocator);
+    defer program.deinit();
+    // if (program == null) {
+    //     std.debug.print("parseProgram() returned null\n", .{});
+    //     try testing.expect(false);
+    // }
 
-    try testing.expectEqual(3, program.?.statements.len);
+    try testing.expectEqual(3, program.statements.len);
 
     const expecteds = [_]struct {
         expected_identifiers: []const u8,
@@ -56,16 +131,13 @@ test "Parser tests" {
     };
 
     for (expecteds, 0..) |expected, i| {
-        if (!testLetStatement(program.?.statements[i], expected.expected_identifiers)) {
-            return;
-        }
+        try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
     }
 }
 
 fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
-    // TODO make sure this print statement works as intended
-    if (std.mem.eql(u8, s.tokenLiteral(), "let")) {
-        std.debug.print("s.tokenLiteral not \"let\". got={any}", .{s});
+    if (!std.mem.eql(u8, s.tokenLiteral(), "let")) {
+        std.debug.print("s.tokenLiteral not \"let\". got={s}", .{s.tokenLiteral()});
         return false;
     }
 
@@ -82,7 +154,7 @@ fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
         return false;
     };
 
-    testing.expectEqualStrings(expected, let_stmt.tokenLiteral()) catch {
+    testing.expectEqualStrings(expected, let_stmt.name.tokenLiteral()) catch {
         std.debug.print("let_stmt.name.tokenLiteral not {s}. got={s}", .{ expected, let_stmt.name.tokenLiteral() });
         return false;
     };
