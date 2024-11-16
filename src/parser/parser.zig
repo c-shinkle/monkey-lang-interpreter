@@ -63,9 +63,13 @@ const Parser = struct {
         if (std.mem.eql(u8, token.LET, self.cur_token._type)) {
             const let_statement = self.parseLetStatement(allocator) orelse return null;
             return ast.Statement{ .let_statement = let_statement };
-        } else {
-            return null;
         }
+        if (std.mem.eql(u8, token.RETURN, self.cur_token._type)) {
+            const return_statement = self.parseReturnStatemetn();
+            return ast.Statement{ .return_statement = return_statement };
+        }
+
+        return null;
     }
 
     fn parseLetStatement(self: *Parser, allocator: std.mem.Allocator) ?ast.LetStatement {
@@ -97,6 +101,18 @@ const Parser = struct {
         return ast.LetStatement{ ._token = let_token, .name = name, .value = null };
     }
 
+    pub fn parseReturnStatemetn(self: *Parser) ast.ReturnStatement {
+        const return_token = self.cur_token;
+
+        self.nextToken();
+
+        while (self.curTokenIs(token.SEMICOLON)) {
+            self.nextToken();
+        }
+
+        return ast.ReturnStatement{ ._token = return_token, .return_value = null };
+    }
+
     fn curTokenIs(self: *const Parser, t: token.TokenType) bool {
         return std.mem.eql(u8, self.cur_token._type, t);
     }
@@ -120,13 +136,14 @@ const Parser = struct {
     }
 
     pub fn peekErrors(self: *Parser, t: token.TokenType) void {
-        const maybe_msg = std.fmt.allocPrint(self.allocator, "expected next token to be {s}, got {s} instead", .{ t, self.peek_token._type });
+        const fmt = "expected next token to be {s}, got {s} instead";
+        const maybe_msg = std.fmt.allocPrint(self.allocator, fmt, .{ t, self.peek_token._type });
         const msg = maybe_msg catch @panic("Failed to alloc peek error!");
         self.errors.append(msg) catch @panic("Failed to append error!");
     }
 };
 
-test "Parser tests" {
+test "Let Statement tests" {
     const input =
         \\let x = 5;
         \\let y = 10;
@@ -139,11 +156,6 @@ test "Parser tests" {
     const program = parser.parseProgram(testing.allocator);
     defer program.deinit();
     checkParserErrors(&parser);
-
-    // if (program == null) {
-    //     std.debug.print("parseProgram() returned null\n", .{});
-    //     try testing.expect(false);
-    // }
 
     try testing.expectEqual(3, program.statements.len);
 
@@ -160,6 +172,36 @@ test "Parser tests" {
     }
 }
 
+test "Return Statement tests" {
+    const input =
+        \\return 5;
+        \\return 10;
+        \\return 993322;
+    ;
+
+    var l = Lexer.init(input);
+    var parser = Parser.init(&l, testing.allocator);
+    defer parser.deinit();
+
+    const program = parser.parseProgram(testing.allocator);
+    defer program.deinit();
+    checkParserErrors(&parser);
+
+    try testing.expectEqual(3, program.statements.len);
+
+    for (program.statements) |stmt| {
+        switch (stmt) {
+            .return_statement => {
+                try testing.expectEqualStrings("return", stmt.return_statement.tokenLiteral());
+            },
+            else => {
+                std.debug.print("stmt is not *ast.ReturnStatement. got={s}", .{@typeName(@TypeOf(stmt))});
+                continue;
+            },
+        }
+    }
+}
+
 fn checkParserErrors(p: *Parser) void {
     const errors = p.getErrors();
     if (errors.len == 0) {
@@ -168,7 +210,7 @@ fn checkParserErrors(p: *Parser) void {
 
     std.debug.print("parser has {d} errors\n", .{errors.len});
     for (errors) |msg| {
-        std.debug.print("parser errro: {s}\n", .{msg});
+        std.debug.print("parser error: {s}\n", .{msg});
     }
     @panic("fail now");
 }
@@ -181,10 +223,10 @@ fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
 
     var let_stmt: ast.LetStatement = switch (s) {
         .let_statement => s.let_statement,
-        // else => {
-        //     std.debug.print("s is not *ast.LetStatement. got={s}", .{@typeName(s)});
-        //     return false;
-        // },
+        else => {
+            std.debug.print("s is not *ast.LetStatement. got={s}", .{@typeName(@TypeOf(s))});
+            return false;
+        },
     };
 
     testing.expectEqualStrings(expected, let_stmt.name.value) catch {

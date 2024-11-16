@@ -19,16 +19,19 @@ pub const Node = union(enum) {
 
 pub const Statement = union(enum) {
     let_statement: LetStatement,
+    return_statement: ReturnStatement,
 
     pub fn tokenLiteral(self: *const Statement) []const u8 {
         return switch (self.*) {
             .let_statement => self.let_statement.tokenLiteral(),
+            .return_statement => self.return_statement.tokenLiteral(),
         };
     }
 
     pub fn statementNode(self: *const Statement) void {
         switch (self.*) {
             .let_statement => self.let_statement.statementNode(),
+            .return_statement => self.return_statement.statementNode(),
         }
     }
 };
@@ -59,6 +62,7 @@ pub const Program = struct {
                 .let_statement => {
                     self.allocator.destroy(stmt.let_statement.name);
                 },
+                .return_statement => {},
             }
         }
         self.allocator.free(self.statements);
@@ -94,6 +98,17 @@ pub const Identifier = struct {
     }
 
     pub fn expressionNode(_: *const Identifier) void {}
+};
+
+pub const ReturnStatement = struct {
+    _token: token.Token,
+    return_value: ?Expression,
+
+    pub fn statementNode(_: *const ReturnStatement) void {}
+
+    pub fn tokenLiteral(self: *const ReturnStatement) []const u8 {
+        return self._token.literal;
+    }
 };
 
 test "ast foo" {
