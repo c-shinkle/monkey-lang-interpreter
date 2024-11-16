@@ -82,9 +82,7 @@ pub const LetStatement = struct {
         return self._token.literal;
     }
 
-    pub fn statementNode(self: *const LetStatement) void {
-        _ = self;
-    }
+    pub fn statementNode(_: *const LetStatement) void {}
 };
 
 pub const Identifier = struct {
