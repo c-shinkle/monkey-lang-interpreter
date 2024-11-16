@@ -7,12 +7,16 @@ const token = @import("token");
 
 const Parser = struct {
     lexer: *Lexer,
+    allocator: std.mem.Allocator,
+    errors: std.ArrayList([]const u8),
     cur_token: ?token.Token,
     peek_token: ?token.Token,
 
-    pub fn init(l: *Lexer) Parser {
+    pub fn init(l: *Lexer, allocator: std.mem.Allocator) Parser {
         var p = Parser{
             .lexer = l,
+            .allocator = allocator,
+            .errors = std.ArrayList([]const u8).init(allocator),
             .cur_token = null,
             .peek_token = null,
         };
@@ -21,6 +25,13 @@ const Parser = struct {
         p.nextToken();
 
         return p;
+    }
+
+    pub fn deinit(self: *Parser) void {
+        for (self.errors.items) |msg| {
+            self.allocator.free(msg);
+        }
+        self.errors.deinit();
     }
 
     fn nextToken(self: *Parser) void {
@@ -99,8 +110,19 @@ const Parser = struct {
             self.nextToken();
             return true;
         } else {
+            self.peekErrors(_token);
             return false;
         }
+    }
+
+    pub fn getErrors(self: *const Parser) [][]const u8 {
+        return self.errors.items;
+    }
+
+    pub fn peekErrors(self: *Parser, t: token.TokenType) void {
+        const maybe_msg = std.fmt.allocPrint(self.allocator, "expected next token to be {s}, got {s} instead", .{ t, self.peek_token.?._type });
+        const msg = maybe_msg catch @panic("Failed to alloc peek error!");
+        self.errors.append(msg) catch @panic("Failed to append error!");
     }
 };
 
@@ -111,10 +133,13 @@ test "Parser tests" {
         \\let foobar = 838383;
     ;
     var l = Lexer.init(input);
-    var parser = Parser.init(&l);
+    var parser = Parser.init(&l, testing.allocator);
+    defer parser.deinit();
 
     const program = parser.parseProgram(testing.allocator);
     defer program.deinit();
+    checkParserErrors(&parser);
+
     // if (program == null) {
     //     std.debug.print("parseProgram() returned null\n", .{});
     //     try testing.expect(false);
@@ -133,6 +158,19 @@ test "Parser tests" {
     for (expecteds, 0..) |expected, i| {
         try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
     }
+}
+
+fn checkParserErrors(p: *Parser) void {
+    const errors = p.getErrors();
+    if (errors.len == 0) {
+        return;
+    }
+
+    std.debug.print("parser has {d} errors\n", .{errors.len});
+    for (errors) |msg| {
+        std.debug.print("parser errro: {s}\n", .{msg});
+    }
+    @panic("fail now");
 }
 
 fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
