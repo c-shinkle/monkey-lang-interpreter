@@ -1,4 +1,5 @@
 const std = @import("std");
+const token = @import("token");
 const lexer = @import("lexer");
 
 pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
@@ -20,7 +21,8 @@ pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
         }
 
         var l = lexer.Lexer.init(input);
-        while (l.nextToken()) |tok| {
+        var tok = l.nextToken();
+        while (!std.mem.eql(u8, tok._type, token.EOF)) : (tok = l.nextToken()) {
             try stdout.print("Type = \"{s}\" Literal = \"{s}\"\n", .{ tok._type, tok.literal });
         }
         fbs.reset();
