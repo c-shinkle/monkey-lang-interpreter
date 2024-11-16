@@ -93,9 +93,7 @@ pub const Identifier = struct {
         return self._token.literal;
     }
 
-    pub fn expressionNode(self: *const Identifier) void {
-        _ = self;
-    }
+    pub fn expressionNode(_: *const Identifier) void {}
 };
 
 test "ast foo" {
