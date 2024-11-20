@@ -5,11 +5,16 @@ const ast = @import("ast");
 const Lexer = @import("lexer").Lexer;
 const token = @import("token");
 
+const PrefixParseFn = *const fn () ast.Expression;
+const InfixParseFn = *const fn (lhs: ast.Expression) ast.Expression;
+
 const Parser = struct {
     lexer: *Lexer,
     errors: std.ArrayList([]const u8),
     cur_token: token.Token,
     peek_token: token.Token,
+    prefix_parse_fns: std.StringHashMap(PrefixParseFn),
+    infix_parse_fns: std.StringHashMap(InfixParseFn),
 
     pub fn init(l: *Lexer, allocator: std.mem.Allocator) Parser {
         var p = Parser{
@@ -17,6 +22,8 @@ const Parser = struct {
             .errors = std.ArrayList([]const u8).init(allocator),
             .cur_token = undefined,
             .peek_token = undefined,
+            .prefix_parse_fns = std.StringHashMap(PrefixParseFn).init(allocator),
+            .infix_parse_fns = std.StringHashMap(InfixParseFn).init(allocator),
         };
 
         p.nextToken();
@@ -30,6 +37,9 @@ const Parser = struct {
             allocator.free(msg);
         }
         self.errors.deinit();
+
+        self.prefix_parse_fns.deinit();
+        self.infix_parse_fns.deinit();
     }
 
     fn nextToken(self: *Parser) void {
@@ -135,6 +145,14 @@ const Parser = struct {
         const maybe_msg = std.fmt.allocPrint(allocator, fmt, .{ t, self.peek_token._type });
         const msg = maybe_msg catch @panic("Failed to alloc peek error!");
         self.errors.append(msg) catch @panic("Failed to append error!");
+    }
+
+    pub fn registerPrefixFns(self: *Parser, t: token.TokenType, prefix_parse_fn: PrefixParseFn) void {
+        self.prefix_parse_fns.put(t, prefix_parse_fn);
+    }
+
+    pub fn registerInfixFns(self: *Parser, t: token.TokenType, infix_parse_fn: InfixParseFn) void {
+        self.infix_parse_fns.put(t, infix_parse_fn);
     }
 };
 
