@@ -16,12 +16,12 @@ pub const Node = union(enum) {
         };
     }
 
-    pub fn string(self: *const Node, allocator: std.mem.Allocator) []const u8 {
-        return switch (self.*) {
-            .program => self.program.string(allocator),
-            .statement => self.statement.string(allocator),
-            .expression => self.expression.string(allocator),
-        };
+    pub fn string(self: *const Node, writer: *std.ArrayList(u8).Writer) void {
+        switch (self.*) {
+            .program => self.program.string(writer),
+            .statement => self.statement.string(writer),
+            .expression => self.expression.string(writer),
+        }
     }
 };
 
@@ -46,11 +46,11 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn string(self: *const Statement, allocator: std.mem.Allocator) []const u8 {
+    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) void {
         return switch (self.*) {
-            .let_statement => self.let_statement.string(allocator),
-            .return_statement => self.return_statement.string(allocator),
-            .expression_statement => self.expression_statement.string(allocator),
+            .let_statement => self.let_statement.string(writer),
+            .return_statement => self.return_statement.string(writer),
+            .expression_statement => self.expression_statement.string(writer),
         };
     }
 };
@@ -70,9 +70,9 @@ pub const Expression = union(enum) {
         }
     }
 
-    pub fn string(self: *const Expression, allocator: std.mem.Allocator) []const u8 {
+    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) void {
         return switch (self.*) {
-            .identifier => self.identifier.string(allocator),
+            .identifier => self.identifier.string(writer),
         };
     }
 };
@@ -101,15 +101,10 @@ pub const Program = struct {
         }
     }
 
-    pub fn string(self: *const Program, allocator: std.mem.Allocator) []const u8 {
-        var strings = std.ArrayList(u8).init(allocator);
-        var writer = strings.writer();
+    pub fn string(self: *const Program, writer: *std.ArrayList(u8).Writer) void {
         for (self.statements) |stmt| {
-            const stmt_string = stmt.string(allocator);
-            defer allocator.free(stmt_string);
-            writer.writeAll(stmt_string) catch @panic("Failed to writeAll()");
+            stmt.string(writer);
         }
-        return strings.toOwnedSlice() catch @panic("Failed toOwnedSlice()");
     }
 };
 
@@ -124,28 +119,19 @@ pub const LetStatement = struct {
 
     pub fn statementNode(_: *const LetStatement) void {}
 
-    pub fn string(self: *const LetStatement, allocator: std.mem.Allocator) []const u8 {
-        var strings = std.ArrayList(u8).init(allocator);
-        var writer = strings.writer();
-
+    pub fn string(self: *const LetStatement, writer: *std.ArrayList(u8).Writer) void {
         writer.writeAll(self.tokenLiteral()) catch @panic("Failed to write!");
         writer.writeByte(' ') catch @panic("Failed to write!");
 
-        const name_string = self.name.string(allocator);
-        writer.writeAll(name_string) catch @panic("Failed to write!");
-        allocator.free(name_string);
+        self.name.string(writer);
 
         writer.writeAll(" = ") catch @panic("Failed to write!");
         if (self.value) |value| {
-            const value_string = value.string(allocator);
-            writer.writeAll(value_string) catch @panic("Failed to write!");
-            allocator.free(value_string);
+            value.string(writer);
         } else {
             writer.writeAll("null") catch @panic("Failed to write!");
         }
         writer.writeByte(';') catch @panic("Failed to write!");
-
-        return strings.toOwnedSlice() catch @panic("Failed toOwnedSlice()");
     }
 };
 
@@ -159,8 +145,8 @@ pub const Identifier = struct {
 
     pub fn expressionNode(_: *const Identifier) void {}
 
-    pub fn string(self: *const Identifier, allocator: std.mem.Allocator) []const u8 {
-        return std.fmt.allocPrint(allocator, "{s}", .{self.value}) catch @panic("Failed to alloc string!");
+    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) void {
+        writer.writeAll(self.value) catch @panic("Failed to write string!");
     }
 };
 
@@ -174,23 +160,16 @@ pub const ReturnStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ReturnStatement, allocator: std.mem.Allocator) []const u8 {
-        var strings = std.ArrayList(u8).init(allocator);
-        var writer = strings.writer();
-
+    pub fn string(self: *const ReturnStatement, writer: *std.ArrayList(u8).Writer) void {
         writer.writeAll(self.tokenLiteral()) catch @panic("Failed to write!");
         writer.writeByte(' ') catch @panic("Failed to write!");
 
         if (self.return_value) |return_value| {
-            const value_string = return_value.string(allocator);
-            writer.writeAll(value_string) catch @panic("Failed to write!");
-            allocator.free(value_string);
+            return_value.string(writer);
         } else {
             writer.writeAll("null") catch @panic("Failed to write!");
         }
         writer.writeByte(';') catch @panic("Failed to write!");
-
-        return strings.toOwnedSlice() catch @panic("Failed toOwnedSlice()");
     }
 };
 
@@ -204,14 +183,12 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement, allocator: std.mem.Allocator) []const u8 {
+    pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) void {
         if (self.expression) |expression| {
-            const expression_string = expression.string(allocator);
-            const maybe_string = std.fmt.allocPrint(allocator, "{s};", .{expression_string});
-            allocator.free(expression_string);
-            return maybe_string catch @panic("Failed to alloc string!");
+            expression.string(writer);
+            writer.writeByte(';') catch @panic("Failed to write!");
         } else {
-            return std.fmt.allocPrint(allocator, "null;", .{}) catch @panic("Failed to alloc string!");
+            writer.writeAll("null;") catch @panic("Failed to alloc string!");
         }
     }
 };
@@ -246,7 +223,10 @@ test "ast foo" {
         .program = program,
     };
 
-    const string = node.string(testing.allocator);
-    try testing.expectEqualStrings("let x = 10;10;return x;", string);
-    testing.allocator.free(string);
+    var string = std.ArrayList(u8).init(testing.allocator);
+    defer string.deinit();
+
+    var writer = string.writer();
+    node.string(&writer);
+    try testing.expectEqualStrings("let x = 10;10;return x;", string.items);
 }
