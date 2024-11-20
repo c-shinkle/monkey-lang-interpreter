@@ -7,7 +7,6 @@ const token = @import("token");
 
 const Parser = struct {
     lexer: *Lexer,
-    allocator: std.mem.Allocator,
     errors: std.ArrayList([]const u8),
     cur_token: token.Token,
     peek_token: token.Token,
@@ -15,7 +14,6 @@ const Parser = struct {
     pub fn init(l: *Lexer, allocator: std.mem.Allocator) Parser {
         var p = Parser{
             .lexer = l,
-            .allocator = allocator,
             .errors = std.ArrayList([]const u8).init(allocator),
             .cur_token = undefined,
             .peek_token = undefined,
@@ -27,9 +25,9 @@ const Parser = struct {
         return p;
     }
 
-    pub fn deinit(self: *Parser) void {
+    pub fn deinit(self: *Parser, allocator: std.mem.Allocator) void {
         for (self.errors.items) |msg| {
-            self.allocator.free(msg);
+            allocator.free(msg);
         }
         self.errors.deinit();
     }
@@ -52,10 +50,7 @@ const Parser = struct {
             p.nextToken();
         }
         return ast.Program{
-            .statements = list.toOwnedSlice() catch {
-                @panic("Failed toOwnedSlice()");
-            },
-            .allocator = allocator,
+            .statements = list.toOwnedSlice() catch @panic("Failed toOwnedSlice()"),
         };
     }
 
@@ -75,7 +70,7 @@ const Parser = struct {
     fn parseLetStatement(self: *Parser, allocator: std.mem.Allocator) ?ast.LetStatement {
         const let_token = self.cur_token;
 
-        if (!self.expectPeek(token.IDENT)) {
+        if (!self.expectPeek(token.IDENT, allocator)) {
             return null;
         }
 
@@ -87,7 +82,7 @@ const Parser = struct {
             .value = self.cur_token.literal,
         };
 
-        if (!self.expectPeek(token.ASSIGN)) {
+        if (!self.expectPeek(token.ASSIGN, allocator)) {
             allocator.destroy(name);
             return null;
         }
@@ -121,12 +116,12 @@ const Parser = struct {
         return std.mem.eql(u8, self.peek_token._type, t);
     }
 
-    fn expectPeek(self: *Parser, _token: token.TokenType) bool {
+    fn expectPeek(self: *Parser, _token: token.TokenType, allocator: std.mem.Allocator) bool {
         if (self.peekTokenIs(_token)) {
             self.nextToken();
             return true;
         } else {
-            self.peekErrors(_token);
+            self.peekErrors(_token, allocator);
             return false;
         }
     }
@@ -135,9 +130,9 @@ const Parser = struct {
         return self.errors.items;
     }
 
-    pub fn peekErrors(self: *Parser, t: token.TokenType) void {
+    pub fn peekErrors(self: *Parser, t: token.TokenType, allocator: std.mem.Allocator) void {
         const fmt = "expected next token to be {s}, got {s} instead";
-        const maybe_msg = std.fmt.allocPrint(self.allocator, fmt, .{ t, self.peek_token._type });
+        const maybe_msg = std.fmt.allocPrint(allocator, fmt, .{ t, self.peek_token._type });
         const msg = maybe_msg catch @panic("Failed to alloc peek error!");
         self.errors.append(msg) catch @panic("Failed to append error!");
     }
@@ -151,10 +146,10 @@ test "Let Statement tests" {
     ;
     var l = Lexer.init(input);
     var parser = Parser.init(&l, testing.allocator);
-    defer parser.deinit();
+    defer parser.deinit(testing.allocator);
 
     const program = parser.parseProgram(testing.allocator);
-    defer program.deinit();
+    defer program.deinit(testing.allocator);
     checkParserErrors(&parser);
 
     try testing.expectEqual(3, program.statements.len);
@@ -181,10 +176,10 @@ test "Return Statement tests" {
 
     var l = Lexer.init(input);
     var parser = Parser.init(&l, testing.allocator);
-    defer parser.deinit();
+    defer parser.deinit(testing.allocator);
 
     const program = parser.parseProgram(testing.allocator);
-    defer program.deinit();
+    defer program.deinit(testing.allocator);
     checkParserErrors(&parser);
 
     try testing.expectEqual(3, program.statements.len);
