@@ -20,7 +20,7 @@ pub const Node = union(enum) {
         return switch (self.*) {
             .program => self.program.string(allocator),
             .statement => self.statement.string(allocator),
-            .expression => self.expression.string(),
+            .expression => self.expression.string(allocator),
         };
     }
 };
@@ -50,7 +50,7 @@ pub const Statement = union(enum) {
         return switch (self.*) {
             .let_statement => self.let_statement.string(allocator),
             .return_statement => self.return_statement.string(allocator),
-            .expression_statement => self.expression_statement.string(),
+            .expression_statement => self.expression_statement.string(allocator),
         };
     }
 };
@@ -70,9 +70,9 @@ pub const Expression = union(enum) {
         }
     }
 
-    pub fn string(self: *const Expression) []const u8 {
+    pub fn string(self: *const Expression, allocator: std.mem.Allocator) []const u8 {
         return switch (self.*) {
-            .identifier => self.identifier.string(),
+            .identifier => self.identifier.string(allocator),
         };
     }
 };
@@ -105,7 +105,9 @@ pub const Program = struct {
         var strings = std.ArrayList(u8).init(allocator);
         var writer = strings.writer();
         for (self.statements) |stmt| {
-            writer.writeAll(stmt.string(allocator)) catch @panic("Failed to writeAll()");
+            const stmt_string = stmt.string(allocator);
+            defer allocator.free(stmt_string);
+            writer.writeAll(stmt_string) catch @panic("Failed to writeAll()");
         }
         return strings.toOwnedSlice() catch @panic("Failed toOwnedSlice()");
     }
@@ -128,10 +130,16 @@ pub const LetStatement = struct {
 
         writer.writeAll(self.tokenLiteral()) catch @panic("Failed to write!");
         writer.writeByte(' ') catch @panic("Failed to write!");
-        writer.writeAll(self.name.string()) catch @panic("Failed to write!");
+
+        const name_string = self.name.string(allocator);
+        writer.writeAll(name_string) catch @panic("Failed to write!");
+        allocator.free(name_string);
+
         writer.writeAll(" = ") catch @panic("Failed to write!");
         if (self.value) |value| {
-            writer.writeAll(value.string()) catch @panic("Failed to write!");
+            const value_string = value.string(allocator);
+            writer.writeAll(value_string) catch @panic("Failed to write!");
+            allocator.free(value_string);
         } else {
             writer.writeAll("null") catch @panic("Failed to write!");
         }
@@ -151,8 +159,8 @@ pub const Identifier = struct {
 
     pub fn expressionNode(_: *const Identifier) void {}
 
-    pub fn string(self: *const Identifier) []const u8 {
-        return self.value;
+    pub fn string(self: *const Identifier, allocator: std.mem.Allocator) []const u8 {
+        return std.fmt.allocPrint(allocator, "{s}", .{self.value}) catch @panic("Failed to alloc string!");
     }
 };
 
@@ -174,11 +182,13 @@ pub const ReturnStatement = struct {
         writer.writeByte(' ') catch @panic("Failed to write!");
 
         if (self.return_value) |return_value| {
-            writer.writeAll(return_value.string()) catch @panic("Failed to write!");
+            const value_string = return_value.string(allocator);
+            writer.writeAll(value_string) catch @panic("Failed to write!");
+            allocator.free(value_string);
         } else {
             writer.writeAll("null") catch @panic("Failed to write!");
         }
-        writer.writeByte(' ') catch @panic("Failed to write!");
+        writer.writeByte(';') catch @panic("Failed to write!");
 
         return strings.toOwnedSlice() catch @panic("Failed toOwnedSlice()");
     }
@@ -194,11 +204,14 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement) []const u8 {
+    pub fn string(self: *const ExpressionStatement, allocator: std.mem.Allocator) []const u8 {
         if (self.expression) |expression| {
-            return expression.string();
+            const expression_string = expression.string(allocator);
+            const maybe_string = std.fmt.allocPrint(allocator, "{s};", .{expression_string});
+            allocator.free(expression_string);
+            return maybe_string catch @panic("Failed to alloc string!");
         } else {
-            return "null";
+            return std.fmt.allocPrint(allocator, "null;", .{}) catch @panic("Failed to alloc string!");
         }
     }
 };
@@ -214,6 +227,16 @@ test "ast foo" {
         .value = Expression{ .identifier = Identifier{ ._token = token.Token{ ._type = token.INT, .literal = "10" }, .value = "10" } },
     } });
 
+    try statements.append(Statement{ .expression_statement = ExpressionStatement{
+        ._token = token.Token{ ._type = token.IDENT, .literal = "x" },
+        .expression = Expression{ .identifier = Identifier{ ._token = token.Token{ ._type = token.IDENT, .literal = "10" }, .value = "10" } },
+    } });
+
+    try statements.append(Statement{ .return_statement = ReturnStatement{
+        ._token = token.Token{ ._type = token.RETURN, .literal = "return" },
+        .return_value = Expression{ .identifier = Identifier{ ._token = token.Token{ ._type = token.IDENT, .literal = "x" }, .value = "x" } },
+    } });
+
     const program = Program{
         .statements = try statements.toOwnedSlice(),
     };
@@ -224,6 +247,6 @@ test "ast foo" {
     };
 
     const string = node.string(testing.allocator);
-    try testing.expectEqualStrings("let x = 10;", string);
+    try testing.expectEqualStrings("let x = 10;10;return x;", string);
     testing.allocator.free(string);
 }
