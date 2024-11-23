@@ -57,22 +57,26 @@ pub const Statement = union(enum) {
 
 pub const Expression = union(enum) {
     identifier: Identifier,
+    integer_literal: IntegerLiteral,
 
     pub fn tokenLiteral(self: *const Expression) []const u8 {
         return switch (self.*) {
-            .identifier => self.identifier.tokenLiteral(),
+            .identifier => |ident| ident.tokenLiteral(),
+            .integer_literal => |int| int.tokenLiteral(),
         };
     }
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
-            .identifier => self.identifier.expressionNode(),
+            .identifier => |ident| ident.expressionNode(),
+            .integer_literal => |int| int.expressionNode(),
         }
     }
 
     pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) !void {
         return switch (self.*) {
-            .identifier => try self.identifier.string(writer),
+            .identifier => |ident| ident.string(writer),
+            .integer_literal => |int| try int.string(writer),
         };
     }
 };
@@ -148,6 +152,21 @@ pub const Identifier = struct {
 
     pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) !void {
         try writer.writeAll(self.value);
+    }
+};
+
+pub const IntegerLiteral = struct {
+    _token: token.Token,
+    value: i64,
+
+    pub fn tokenLiteral(self: *const IntegerLiteral) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const IntegerLiteral) void {}
+
+    pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeAll(self._token.literal);
     }
 };
 
@@ -230,6 +249,6 @@ test "ast foo" {
     defer string.deinit();
 
     var writer = string.writer();
-    node.string(&writer) catch @panic("Failed to write string!");
+    try node.string(&writer);
     try testing.expectEqualStrings("let x = 10;10;return x;", string.items);
 }
