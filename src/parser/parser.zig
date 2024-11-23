@@ -10,18 +10,20 @@ const InfixParseFn = *const fn (lhs: ast.Expression) ast.Expression;
 
 const Parser = struct {
     lexer: *Lexer,
-    errors: std.ArrayList([]const u8),
     cur_token: token.Token,
     peek_token: token.Token,
+    allocator: std.mem.Allocator,
+    errors: std.ArrayList([]const u8),
     prefix_parse_fns: std.StringHashMap(PrefixParseFn),
     infix_parse_fns: std.StringHashMap(InfixParseFn),
 
-    pub fn init(l: *Lexer, allocator: std.mem.Allocator) Parser {
+    pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Parser {
         var p = Parser{
-            .lexer = l,
-            .errors = std.ArrayList([]const u8).init(allocator),
+            .lexer = lexer,
             .cur_token = undefined,
             .peek_token = undefined,
+            .allocator = allocator,
+            .errors = std.ArrayList([]const u8).init(allocator),
             .prefix_parse_fns = std.StringHashMap(PrefixParseFn).init(allocator),
             .infix_parse_fns = std.StringHashMap(InfixParseFn).init(allocator),
         };
@@ -32,9 +34,9 @@ const Parser = struct {
         return p;
     }
 
-    pub fn deinit(self: *Parser, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Parser) void {
         for (self.errors.items) |msg| {
-            allocator.free(msg);
+            self.allocator.free(msg);
         }
         self.errors.deinit();
 
@@ -47,26 +49,25 @@ const Parser = struct {
         self.peek_token = self.lexer.nextToken();
     }
 
-    fn parseProgram(p: *Parser, allocator: std.mem.Allocator) ast.Program {
-        var list = std.ArrayList(ast.Statement).init(allocator);
+    fn parseProgram(self: *Parser) ast.Program {
+        var list = std.ArrayList(ast.Statement).init(self.allocator);
 
-        while (!std.mem.eql(u8, p.cur_token._type, token.EOF)) {
-            const maybe_statement = p.parseStatement(allocator);
+        while (!std.mem.eql(u8, self.cur_token._type, token.EOF)) {
+            const maybe_statement = self.parseStatement();
             if (maybe_statement) |stmt| {
-                list.append(stmt) catch {
-                    @panic("Failed to append to statements ArrayList");
-                };
+                list.append(stmt) catch @panic("Failed to append to statements ArrayList");
             }
-            p.nextToken();
+            self.nextToken();
         }
         return ast.Program{
+            .allocator = self.allocator,
             .statements = list.toOwnedSlice() catch @panic("Failed toOwnedSlice()"),
         };
     }
 
-    fn parseStatement(self: *Parser, allocator: std.mem.Allocator) ?ast.Statement {
+    fn parseStatement(self: *Parser) ?ast.Statement {
         if (std.mem.eql(u8, token.LET, self.cur_token._type)) {
-            const let_statement = self.parseLetStatement(allocator) orelse return null;
+            const let_statement = self.parseLetStatement() orelse return null;
             return ast.Statement{ .let_statement = let_statement };
         }
         if (std.mem.eql(u8, token.RETURN, self.cur_token._type)) {
@@ -77,23 +78,21 @@ const Parser = struct {
         return null;
     }
 
-    fn parseLetStatement(self: *Parser, allocator: std.mem.Allocator) ?ast.LetStatement {
+    fn parseLetStatement(self: *Parser) ?ast.LetStatement {
         const let_token = self.cur_token;
 
-        if (!self.expectPeek(token.IDENT, allocator)) {
+        if (!self.expectPeek(token.IDENT)) {
             return null;
         }
 
-        const name: *ast.Identifier = allocator.create(ast.Identifier) catch {
-            @panic("Failed to allocate ast.Identifier");
-        };
+        const name: *ast.Identifier = self.allocator.create(ast.Identifier) catch @panic("Failed to allocate ast.Identifier");
         name.* = ast.Identifier{
             ._token = self.cur_token,
             .value = self.cur_token.literal,
         };
 
-        if (!self.expectPeek(token.ASSIGN, allocator)) {
-            allocator.destroy(name);
+        if (!self.expectPeek(token.ASSIGN)) {
+            self.allocator.destroy(name);
             return null;
         }
 
@@ -126,12 +125,12 @@ const Parser = struct {
         return std.mem.eql(u8, self.peek_token._type, t);
     }
 
-    fn expectPeek(self: *Parser, _token: token.TokenType, allocator: std.mem.Allocator) bool {
+    fn expectPeek(self: *Parser, _token: token.TokenType) bool {
         if (self.peekTokenIs(_token)) {
             self.nextToken();
             return true;
         } else {
-            self.peekErrors(_token, allocator);
+            self.peekErrors(_token);
             return false;
         }
     }
@@ -140,9 +139,9 @@ const Parser = struct {
         return self.errors.items;
     }
 
-    pub fn peekErrors(self: *Parser, t: token.TokenType, allocator: std.mem.Allocator) void {
+    pub fn peekErrors(self: *Parser, t: token.TokenType) void {
         const fmt = "expected next token to be {s}, got {s} instead";
-        const maybe_msg = std.fmt.allocPrint(allocator, fmt, .{ t, self.peek_token._type });
+        const maybe_msg = std.fmt.allocPrint(self.allocator, fmt, .{ t, self.peek_token._type });
         const msg = maybe_msg catch @panic("Failed to alloc peek error!");
         self.errors.append(msg) catch @panic("Failed to append error!");
     }
@@ -164,10 +163,10 @@ test "Let Statement tests" {
     ;
     var l = Lexer.init(input);
     var parser = Parser.init(&l, testing.allocator);
-    defer parser.deinit(testing.allocator);
+    defer parser.deinit();
 
-    const program = parser.parseProgram(testing.allocator);
-    defer program.deinit(testing.allocator);
+    const program = parser.parseProgram();
+    defer program.deinit();
     checkParserErrors(&parser);
 
     try testing.expectEqual(3, program.statements.len);
@@ -194,10 +193,10 @@ test "Return Statement tests" {
 
     var l = Lexer.init(input);
     var parser = Parser.init(&l, testing.allocator);
-    defer parser.deinit(testing.allocator);
+    defer parser.deinit();
 
-    const program = parser.parseProgram(testing.allocator);
-    defer program.deinit(testing.allocator);
+    const program = parser.parseProgram();
+    defer program.deinit();
     checkParserErrors(&parser);
 
     try testing.expectEqual(3, program.statements.len);

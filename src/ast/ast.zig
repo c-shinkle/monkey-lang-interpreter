@@ -16,11 +16,11 @@ pub const Node = union(enum) {
         };
     }
 
-    pub fn string(self: *const Node, writer: *std.ArrayList(u8).Writer) void {
+    pub fn string(self: *const Node, writer: *std.ArrayList(u8).Writer) !void {
         switch (self.*) {
-            .program => self.program.string(writer),
-            .statement => self.statement.string(writer),
-            .expression => self.expression.string(writer),
+            .program => try self.program.string(writer),
+            .statement => try self.statement.string(writer),
+            .expression => try self.expression.string(writer),
         }
     }
 };
@@ -46,11 +46,11 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) void {
+    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) !void {
         return switch (self.*) {
-            .let_statement => self.let_statement.string(writer),
-            .return_statement => self.return_statement.string(writer),
-            .expression_statement => self.expression_statement.string(writer),
+            .let_statement => try self.let_statement.string(writer),
+            .return_statement => try self.return_statement.string(writer),
+            .expression_statement => try self.expression_statement.string(writer),
         };
     }
 };
@@ -70,27 +70,28 @@ pub const Expression = union(enum) {
         }
     }
 
-    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) void {
+    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) !void {
         return switch (self.*) {
-            .identifier => self.identifier.string(writer),
+            .identifier => try self.identifier.string(writer),
         };
     }
 };
 
 pub const Program = struct {
+    allocator: std.mem.Allocator,
     statements: []const Statement,
 
-    pub fn deinit(self: *const Program, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const Program) void {
         for (self.statements) |stmt| {
             switch (stmt) {
                 .let_statement => {
-                    allocator.destroy(stmt.let_statement.name);
+                    self.allocator.destroy(stmt.let_statement.name);
                 },
                 .return_statement => {},
                 .expression_statement => {},
             }
         }
-        allocator.free(self.statements);
+        self.allocator.free(self.statements);
     }
 
     pub fn tokenLiteral(self: *const Program) []const u8 {
@@ -101,9 +102,9 @@ pub const Program = struct {
         }
     }
 
-    pub fn string(self: *const Program, writer: *std.ArrayList(u8).Writer) void {
+    pub fn string(self: *const Program, writer: *std.ArrayList(u8).Writer) !void {
         for (self.statements) |stmt| {
-            stmt.string(writer);
+            try stmt.string(writer);
         }
     }
 };
@@ -119,19 +120,19 @@ pub const LetStatement = struct {
 
     pub fn statementNode(_: *const LetStatement) void {}
 
-    pub fn string(self: *const LetStatement, writer: *std.ArrayList(u8).Writer) void {
-        writer.writeAll(self.tokenLiteral()) catch @panic("Failed to write!");
-        writer.writeByte(' ') catch @panic("Failed to write!");
+    pub fn string(self: *const LetStatement, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeAll(self.tokenLiteral());
+        try writer.writeByte(' ');
 
-        self.name.string(writer);
+        try self.name.string(writer);
 
-        writer.writeAll(" = ") catch @panic("Failed to write!");
+        try writer.writeAll(" = ");
         if (self.value) |value| {
-            value.string(writer);
+            try value.string(writer);
         } else {
-            writer.writeAll("null") catch @panic("Failed to write!");
+            try writer.writeAll("null");
         }
-        writer.writeByte(';') catch @panic("Failed to write!");
+        try writer.writeByte(';');
     }
 };
 
@@ -145,8 +146,8 @@ pub const Identifier = struct {
 
     pub fn expressionNode(_: *const Identifier) void {}
 
-    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) void {
-        writer.writeAll(self.value) catch @panic("Failed to write string!");
+    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeAll(self.value);
     }
 };
 
@@ -160,16 +161,16 @@ pub const ReturnStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ReturnStatement, writer: *std.ArrayList(u8).Writer) void {
-        writer.writeAll(self.tokenLiteral()) catch @panic("Failed to write!");
-        writer.writeByte(' ') catch @panic("Failed to write!");
+    pub fn string(self: *const ReturnStatement, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeAll(self.tokenLiteral());
+        try writer.writeByte(' ');
 
         if (self.return_value) |return_value| {
-            return_value.string(writer);
+            try return_value.string(writer);
         } else {
-            writer.writeAll("null") catch @panic("Failed to write!");
+            try writer.writeAll("null");
         }
-        writer.writeByte(';') catch @panic("Failed to write!");
+        try writer.writeByte(';');
     }
 };
 
@@ -183,21 +184,22 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) void {
+    pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) !void {
         if (self.expression) |expression| {
-            expression.string(writer);
-            writer.writeByte(';') catch @panic("Failed to write!");
+            try expression.string(writer);
+            try writer.writeByte(';');
         } else {
-            writer.writeAll("null;") catch @panic("Failed to alloc string!");
+            try writer.writeAll("null;");
         }
     }
 };
 
 test "ast foo" {
-    const name = try testing.allocator.create(Identifier);
+    var allocator = testing.allocator;
+    const name = try allocator.create(Identifier);
     name.* = Identifier{ ._token = token.Token{ ._type = token.IDENT, .literal = "x" }, .value = "x" };
 
-    var statements = std.ArrayList(Statement).init(testing.allocator);
+    var statements = std.ArrayList(Statement).init(allocator);
     try statements.append(Statement{ .let_statement = LetStatement{
         ._token = token.Token{ ._type = token.LET, .literal = "let" },
         .name = name,
@@ -216,17 +218,18 @@ test "ast foo" {
 
     const program = Program{
         .statements = try statements.toOwnedSlice(),
+        .allocator = allocator,
     };
-    defer program.deinit(testing.allocator);
+    defer program.deinit();
 
     const node = Node{
         .program = program,
     };
 
-    var string = std.ArrayList(u8).init(testing.allocator);
+    var string = std.ArrayList(u8).init(allocator);
     defer string.deinit();
 
     var writer = string.writer();
-    node.string(&writer);
+    node.string(&writer) catch @panic("Failed to write string!");
     try testing.expectEqualStrings("let x = 10;10;return x;", string.items);
 }
