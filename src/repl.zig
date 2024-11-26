@@ -1,6 +1,6 @@
 const std = @import("std");
-const token = @import("token");
-const lexer = @import("lexer");
+const token = @import("./token.zig");
+const lexer = @import("./lexer.zig");
 
 pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
     var bw = std.io.bufferedWriter(writer);

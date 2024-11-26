@@ -1,5 +1,5 @@
 const std = @import("std");
-const token = @import("token");
+const token = @import("./token.zig");
 
 const testing = std.testing;
 
