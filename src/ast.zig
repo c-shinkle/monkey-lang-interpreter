@@ -25,62 +25,6 @@ pub const Node = union(enum) {
     }
 };
 
-pub const Statement = union(enum) {
-    let_statement: LetStatement,
-    return_statement: ReturnStatement,
-    expression_statement: ExpressionStatement,
-
-    pub fn tokenLiteral(self: *const Statement) []const u8 {
-        return switch (self.*) {
-            .let_statement => self.let_statement.tokenLiteral(),
-            .return_statement => self.return_statement.tokenLiteral(),
-            .expression_statement => self.expression_statement.tokenLiteral(),
-        };
-    }
-
-    pub fn statementNode(self: *const Statement) void {
-        switch (self.*) {
-            .let_statement => self.let_statement.statementNode(),
-            .return_statement => self.return_statement.statementNode(),
-            .expression_statement => self.expression_statement.statementNode(),
-        }
-    }
-
-    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) !void {
-        return switch (self.*) {
-            .let_statement => try self.let_statement.string(writer),
-            .return_statement => try self.return_statement.string(writer),
-            .expression_statement => try self.expression_statement.string(writer),
-        };
-    }
-};
-
-pub const Expression = union(enum) {
-    identifier: Identifier,
-    integer_literal: IntegerLiteral,
-
-    pub fn tokenLiteral(self: *const Expression) []const u8 {
-        return switch (self.*) {
-            .identifier => |ident| ident.tokenLiteral(),
-            .integer_literal => |int| int.tokenLiteral(),
-        };
-    }
-
-    pub fn expressionNode(self: *const Expression) void {
-        switch (self.*) {
-            .identifier => |ident| ident.expressionNode(),
-            .integer_literal => |int| int.expressionNode(),
-        }
-    }
-
-    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) !void {
-        return switch (self.*) {
-            .identifier => |ident| ident.string(writer),
-            .integer_literal => |int| try int.string(writer),
-        };
-    }
-};
-
 pub const Program = struct {
     allocator: std.mem.Allocator,
     statements: []const Statement,
@@ -113,6 +57,36 @@ pub const Program = struct {
     }
 };
 
+pub const Statement = union(enum) {
+    let_statement: LetStatement,
+    return_statement: ReturnStatement,
+    expression_statement: ExpressionStatement,
+
+    pub fn tokenLiteral(self: *const Statement) []const u8 {
+        return switch (self.*) {
+            .let_statement => self.let_statement.tokenLiteral(),
+            .return_statement => self.return_statement.tokenLiteral(),
+            .expression_statement => self.expression_statement.tokenLiteral(),
+        };
+    }
+
+    pub fn statementNode(self: *const Statement) void {
+        switch (self.*) {
+            .let_statement => self.let_statement.statementNode(),
+            .return_statement => self.return_statement.statementNode(),
+            .expression_statement => self.expression_statement.statementNode(),
+        }
+    }
+
+    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) !void {
+        return switch (self.*) {
+            .let_statement => try self.let_statement.string(writer),
+            .return_statement => try self.return_statement.string(writer),
+            .expression_statement => try self.expression_statement.string(writer),
+        };
+    }
+};
+
 pub const LetStatement = struct {
     _token: token.Token,
     name: *const Identifier,
@@ -137,36 +111,6 @@ pub const LetStatement = struct {
             try writer.writeAll("null");
         }
         try writer.writeByte(';');
-    }
-};
-
-pub const Identifier = struct {
-    _token: token.Token,
-    value: []const u8,
-
-    pub fn tokenLiteral(self: *const Identifier) []const u8 {
-        return self._token.literal;
-    }
-
-    pub fn expressionNode(_: *const Identifier) void {}
-
-    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) !void {
-        try writer.writeAll(self.value);
-    }
-};
-
-pub const IntegerLiteral = struct {
-    _token: token.Token,
-    value: i64,
-
-    pub fn tokenLiteral(self: *const IntegerLiteral) []const u8 {
-        return self._token.literal;
-    }
-
-    pub fn expressionNode(_: *const IntegerLiteral) void {}
-
-    pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) !void {
-        try writer.writeAll(self._token.literal);
     }
 };
 
@@ -210,6 +154,62 @@ pub const ExpressionStatement = struct {
         } else {
             try writer.writeAll("null;");
         }
+    }
+};
+
+pub const Expression = union(enum) {
+    identifier: Identifier,
+    integer_literal: IntegerLiteral,
+
+    pub fn tokenLiteral(self: *const Expression) []const u8 {
+        return switch (self.*) {
+            .identifier => |ident| ident.tokenLiteral(),
+            .integer_literal => |int| int.tokenLiteral(),
+        };
+    }
+
+    pub fn expressionNode(self: *const Expression) void {
+        switch (self.*) {
+            .identifier => |ident| ident.expressionNode(),
+            .integer_literal => |int| int.expressionNode(),
+        }
+    }
+
+    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) !void {
+        return switch (self.*) {
+            .identifier => |ident| ident.string(writer),
+            .integer_literal => |int| try int.string(writer),
+        };
+    }
+};
+
+pub const Identifier = struct {
+    _token: token.Token,
+    value: []const u8,
+
+    pub fn tokenLiteral(self: *const Identifier) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const Identifier) void {}
+
+    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeAll(self.value);
+    }
+};
+
+pub const IntegerLiteral = struct {
+    _token: token.Token,
+    value: i64,
+
+    pub fn tokenLiteral(self: *const IntegerLiteral) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const IntegerLiteral) void {}
+
+    pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeAll(self._token.literal);
     }
 };
 
