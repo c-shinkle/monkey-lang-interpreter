@@ -1,9 +1,9 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ast = @import("ast");
-const Lexer = @import("lexer").Lexer;
-const token = @import("token");
+const ast = @import("./ast.zig");
+const Lexer = @import("./lexer.zig").Lexer;
+const token = @import("./token.zig");
 
 const PrefixParseFn = *const fn (self: *Parser) ?ast.Expression;
 const InfixParseFn = *const fn (self: *const Parser, lhs: ast.Expression) ast.Expression;
