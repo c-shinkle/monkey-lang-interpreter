@@ -5,18 +5,13 @@ const ast = @import("./ast.zig");
 const Lexer = @import("./lexer.zig").Lexer;
 const token = @import("./token.zig");
 
-const ExpressionError =
-    error{UnknownPrefixToken} ||
-    std.fmt.ParseIntError;
+const ExpressionError = error{UnknownPrefixToken} || std.fmt.ParseIntError;
 
 const LetStatementError = error{ MissingLetIdentifier, MissingLetAssign } || std.mem.Allocator.Error;
 
-const StatementError =
-    ExpressionError ||
-    LetStatementError ||
-    std.fmt.ParseIntError ||
-    std.fmt.AllocPrintError ||
-    std.mem.Allocator.Error;
+const StatementError = ExpressionError || LetStatementError;
+
+const ProgramError = std.mem.Allocator.Error || std.fmt.AllocPrintError;
 
 const PrefixParseFn = *const fn (self: *Parser) ExpressionError!ast.Expression;
 const InfixParseFn = *const fn (self: *const Parser, lhs: ast.Expression) ExpressionError!ast.Expression;
@@ -42,7 +37,7 @@ const Parser = struct {
 
     // Initialization
 
-    pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Parser {
+    pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) !Parser {
         var p = Parser{
             .lexer = lexer,
             .cur_token = undefined,
@@ -52,9 +47,10 @@ const Parser = struct {
             .prefix_parse_fns = std.StringHashMap(PrefixParseFn).init(allocator),
             .infix_parse_fns = std.StringHashMap(InfixParseFn).init(allocator),
         };
+        errdefer p.deinit();
 
-        p.registerPrefixFns(token.IDENT, parseIdentifier);
-        p.registerPrefixFns(token.INT, parseIntegerLiteral);
+        try p.registerPrefixFns(token.IDENT, parseIdentifier);
+        try p.registerPrefixFns(token.INT, parseIntegerLiteral);
 
         p.nextToken();
         p.nextToken();
@@ -75,36 +71,48 @@ const Parser = struct {
 
     // Program
 
-    fn parseProgram(self: *Parser) error{OutOfMemory}!ast.Program {
+    fn parseProgram(self: *Parser) ProgramError!ast.Program {
         var list = std.ArrayList(ast.Statement).init(self.allocator);
-        errdefer list.deinit();
+        errdefer {
+            for (list.items) |stmt| switch (stmt) {
+                .let_statement => |let_stmt| self.allocator.destroy(let_stmt.name),
+                .expression_statement => {},
+                .return_statement => {},
+            };
+            list.deinit();
+        }
 
         while (!std.mem.eql(u8, self.cur_token._type, token.EOF)) {
-            if (self.parseStatement()) |stmt| {
-                list.append(stmt) catch @panic("Failed to append to statements ArrayList");
-            } else |err| {
-                switch (err) {
-                    StatementError.UnknownPrefixToken => {},
-                    StatementError.MissingLetIdentifier => {
-                        self.peekErrors(token.IDENT);
-                    },
-                    StatementError.MissingLetAssign => {
-                        self.peekErrors(token.ASSIGN);
-                    },
-                    StatementError.InvalidCharacter, StatementError.Overflow => {
-                        const fmt = "could not parse {s} as integer";
-                        const msg = try std.fmt.allocPrint(self.allocator, fmt, .{self.cur_token.literal});
-                        try self.errors.append(msg);
-                    },
-                    StatementError.OutOfMemory => return StatementError.OutOfMemory,
-                }
+            const maybe_stmt = self.parseStatement();
+            errdefer {
+                if (maybe_stmt) |stmt| switch (stmt) {
+                    .let_statement => |let_stmt| self.allocator.destroy(let_stmt.name),
+                    .expression_statement => {},
+                    .return_statement => {},
+                } else |_| {}
+            }
+
+            if (maybe_stmt) |stmt| {
+                try list.append(stmt);
+            } else |err| switch (err) {
+                StatementError.UnknownPrefixToken => {},
+                StatementError.MissingLetIdentifier => {},
+                StatementError.MissingLetAssign => {},
+                StatementError.InvalidCharacter, StatementError.Overflow => {
+                    const fmt = "could not parse {s} as integer";
+                    const msg = try std.fmt.allocPrint(self.allocator, fmt, .{self.cur_token.literal});
+                    errdefer self.allocator.free(msg);
+                    try self.errors.append(msg);
+                },
+                StatementError.OutOfMemory => return ProgramError.OutOfMemory,
             }
 
             self.nextToken();
         }
+
         return ast.Program{
             .allocator = self.allocator,
-            .statements = list.toOwnedSlice() catch @panic("Failed toOwnedSlice()"),
+            .statements = try list.toOwnedSlice(),
         };
     }
 
@@ -127,10 +135,11 @@ const Parser = struct {
         const let_token = self.cur_token;
 
         if (!self.expectPeek(token.IDENT)) {
+            try self.peekErrors(token.IDENT);
             return StatementError.MissingLetIdentifier;
         }
 
-        const name: *ast.Identifier = try self.allocator.create(ast.Identifier);
+        const name = try self.allocator.create(ast.Identifier);
         errdefer self.allocator.destroy(name);
 
         name.* = ast.Identifier{
@@ -139,6 +148,7 @@ const Parser = struct {
         };
 
         if (!self.expectPeek(token.ASSIGN)) {
+            try self.peekErrors(token.ASSIGN);
             return StatementError.MissingLetAssign;
         }
 
@@ -224,21 +234,45 @@ const Parser = struct {
         return self.errors.items;
     }
 
-    fn peekErrors(self: *Parser, t: token.TokenType) void {
+    fn peekErrors(self: *Parser, t: token.TokenType) !void {
         const fmt = "expected next token to be {s}, got {s} instead";
-        const maybe_msg = std.fmt.allocPrint(self.allocator, fmt, .{ t, self.peek_token._type });
-        const msg = maybe_msg catch @panic("Failed to alloc msg!");
-        self.errors.append(msg) catch @panic("Failed to append error!");
+        const msg = try std.fmt.allocPrint(self.allocator, fmt, .{ t, self.peek_token._type });
+        errdefer self.allocator.free(msg);
+        try self.errors.append(msg);
     }
 
-    fn registerPrefixFns(self: *Parser, token_type: token.TokenType, func: PrefixParseFn) void {
-        self.prefix_parse_fns.put(token_type, func) catch @panic("Failed to put!");
+    fn registerPrefixFns(self: *Parser, token_type: token.TokenType, func: PrefixParseFn) !void {
+        try self.prefix_parse_fns.put(token_type, func);
     }
 
-    fn registerInfixFns(self: *Parser, token_type: token.TokenType, func: InfixParseFn) void {
-        self.infix_parse_fns.put(token_type, func) catch @panic("Failed to put!");
+    fn registerInfixFns(self: *Parser, token_type: token.TokenType, func: InfixParseFn) !void {
+        try self.infix_parse_fns.put(token_type, func);
     }
 };
+
+test "Out of Memory, Program Statement, no Parser errors" {
+    const input = "let x = 5;";
+
+    const expecteds = [_]Expected{.{ .expected_identifiers = "x" }};
+
+    try testing.checkAllAllocationFailures(testing.allocator, outOfMemoryTest, .{ input, &expecteds });
+}
+
+test "Out of Memory, Program Statement, with Parser errors" {
+    const input =
+        \\let x 5;
+        \\let = 10;
+        \\let 838383
+    ;
+
+    const expecteds = [_][]const u8{
+        "expected next token to be =, got INT instead",
+        "expected next token to be IDENT, got = instead",
+        "expected next token to be IDENT, got INT instead",
+    };
+
+    try testing.checkAllAllocationFailures(testing.allocator, outOfMemoryWithParserErrorsTest, .{ input, &expecteds });
+}
 
 test "Let Statement" {
     const input =
@@ -247,12 +281,12 @@ test "Let Statement" {
         \\let foobar = 838383;
     ;
     var l = Lexer.init(input);
-    var parser = Parser.init(&l, testing.allocator);
+    var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
 
     const program = try parser.parseProgram();
     defer program.deinit();
-    checkParserErrors(&parser);
+    try checkParserErrors(&parser);
 
     const len = 3;
     try testing.expectEqual(len, program.statements.len);
@@ -273,7 +307,7 @@ test "Let Statement" {
 test "Let Statement missing assign token" {
     const input = "let x;";
     var l = Lexer.init(input);
-    var parser = Parser.init(&l, testing.allocator);
+    var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
 
     const program = try parser.parseProgram();
@@ -292,12 +326,12 @@ test "Return Statement" {
     ;
 
     var l = Lexer.init(input);
-    var parser = Parser.init(&l, testing.allocator);
+    var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
 
     const program = try parser.parseProgram();
     defer program.deinit();
-    checkParserErrors(&parser);
+    try checkParserErrors(&parser);
 
     try testing.expectEqual(3, program.statements.len);
 
@@ -318,11 +352,11 @@ test "Identifier Expression" {
     const input = "foobar;";
 
     var l = Lexer.init(input);
-    var parser = Parser.init(&l, testing.allocator);
+    var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
     defer program.deinit();
-    checkParserErrors(&parser);
+    try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
@@ -351,11 +385,11 @@ test "Integer Literal Expression" {
     const input = "5;";
 
     var l = Lexer.init(input);
-    var parser = Parser.init(&l, testing.allocator);
+    var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
     defer program.deinit();
-    checkParserErrors(&parser);
+    try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
@@ -380,7 +414,11 @@ test "Integer Literal Expression" {
     try testing.expectEqualStrings("5", literal.tokenLiteral());
 }
 
-fn checkParserErrors(p: *const Parser) void {
+const Expected = struct {
+    expected_identifiers: []const u8,
+};
+
+fn checkParserErrors(p: *const Parser) !void {
     const errors = p.getErrors();
     if (errors.len == 0) {
         return;
@@ -390,7 +428,7 @@ fn checkParserErrors(p: *const Parser) void {
     for (errors) |msg| {
         std.debug.print("parser error: {s}\n", .{msg});
     }
-    @panic("fail now");
+    return error.FoundParserErrors;
 }
 
 fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
@@ -418,4 +456,38 @@ fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
     };
 
     return true;
+}
+
+fn outOfMemoryTest(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, allocator);
+    defer parser.deinit();
+
+    const program = try parser.parseProgram();
+    defer program.deinit();
+
+    try checkParserErrors(&parser);
+
+    try testing.expect(expecteds.len == program.statements.len);
+
+    for (expecteds, 0..) |expected, i| {
+        try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
+    }
+}
+
+fn outOfMemoryWithParserErrorsTest(allocator: std.mem.Allocator, input: []const u8, expecteds: []const []const u8) !void {
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, allocator);
+    defer parser.deinit();
+
+    const program = try parser.parseProgram();
+    defer program.deinit();
+
+    const parser_errors = parser.getErrors();
+
+    try testing.expect(expecteds.len == parser_errors.len);
+
+    for (parser_errors, 0..) |parser_error, i| {
+        try testing.expectEqualStrings(expecteds[i], parser_error);
+    }
 }
