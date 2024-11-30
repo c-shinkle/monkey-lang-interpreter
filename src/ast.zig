@@ -3,6 +3,8 @@ const token = @import("./token.zig");
 
 const testing = std.testing;
 
+const StringError = std.ArrayList(u8).Writer.Error;
+
 pub const Node = union(enum) {
     program: Program,
     statement: Statement,
@@ -16,7 +18,7 @@ pub const Node = union(enum) {
         };
     }
 
-    pub fn string(self: *const Node, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const Node, writer: *std.ArrayList(u8).Writer) StringError!void {
         switch (self.*) {
             .program => try self.program.string(writer),
             .statement => try self.statement.string(writer),
@@ -50,7 +52,7 @@ pub const Program = struct {
         }
     }
 
-    pub fn string(self: *const Program, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const Program, writer: *std.ArrayList(u8).Writer) StringError!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -78,12 +80,12 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) !void {
-        return switch (self.*) {
+    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) StringError!void {
+        switch (self.*) {
             .let_statement => try self.let_statement.string(writer),
             .return_statement => try self.return_statement.string(writer),
             .expression_statement => try self.expression_statement.string(writer),
-        };
+        }
     }
 };
 
@@ -98,7 +100,7 @@ pub const LetStatement = struct {
 
     pub fn statementNode(_: *const LetStatement) void {}
 
-    pub fn string(self: *const LetStatement, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const LetStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
 
@@ -124,7 +126,7 @@ pub const ReturnStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ReturnStatement, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const ReturnStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
 
@@ -147,7 +149,7 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
         if (self.expression) |expression| {
             try expression.string(writer);
             try writer.writeByte(';');
@@ -160,11 +162,13 @@ pub const ExpressionStatement = struct {
 pub const Expression = union(enum) {
     identifier: Identifier,
     integer_literal: IntegerLiteral,
+    prefix: PrefixExpression,
 
     pub fn tokenLiteral(self: *const Expression) []const u8 {
         return switch (self.*) {
             .identifier => |ident| ident.tokenLiteral(),
             .integer_literal => |int| int.tokenLiteral(),
+            .prefix => |prefix| prefix.tokenLiteral(),
         };
     }
 
@@ -172,14 +176,16 @@ pub const Expression = union(enum) {
         switch (self.*) {
             .identifier => |ident| ident.expressionNode(),
             .integer_literal => |int| int.expressionNode(),
+            .prefix => |prefix| prefix.expressionNode(),
         }
     }
 
-    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) !void {
-        return switch (self.*) {
-            .identifier => |ident| ident.string(writer),
+    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) StringError!void {
+        switch (self.*) {
+            .identifier => |ident| try ident.string(writer),
             .integer_literal => |int| try int.string(writer),
-        };
+            .prefix => |prefix| try prefix.string(writer),
+        }
     }
 };
 
@@ -193,7 +199,7 @@ pub const Identifier = struct {
 
     pub fn expressionNode(_: *const Identifier) void {}
 
-    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self.value);
     }
 };
@@ -208,8 +214,29 @@ pub const IntegerLiteral = struct {
 
     pub fn expressionNode(_: *const IntegerLiteral) void {}
 
-    pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) !void {
+    pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self._token.literal);
+    }
+};
+
+pub const PrefixExpression = struct {
+    _token: token.Token,
+    operator: []const u8,
+    right: *Expression,
+
+    pub fn tokenLiteral(self: *const PrefixExpression) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const PrefixExpression) void {}
+
+    pub fn string(self: *const PrefixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
+        try writer.writeByte('(');
+        try writer.writeAll(self.operator);
+
+        try self.right.string(writer);
+
+        try writer.writeByte(')');
     }
 };
 
