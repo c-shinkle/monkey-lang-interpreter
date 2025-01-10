@@ -79,11 +79,11 @@ pub const Statement = union(enum) {
     }
 
     pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) !void {
-        return switch (self.*) {
+        switch (self.*) {
             .let_statement => try self.let_statement.string(writer),
             .return_statement => try self.return_statement.string(writer),
             .expression_statement => try self.expression_statement.string(writer),
-        };
+        }
     }
 };
 
@@ -160,11 +160,13 @@ pub const ExpressionStatement = struct {
 pub const Expression = union(enum) {
     identifier: Identifier,
     integer_literal: IntegerLiteral,
+    prefix: PrefixExpression,
 
     pub fn tokenLiteral(self: *const Expression) []const u8 {
         return switch (self.*) {
             .identifier => |ident| ident.tokenLiteral(),
             .integer_literal => |int| int.tokenLiteral(),
+            .prefix => |prefix| prefix.tokenLiteral(),
         };
     }
 
@@ -172,14 +174,16 @@ pub const Expression = union(enum) {
         switch (self.*) {
             .identifier => |ident| ident.expressionNode(),
             .integer_literal => |int| int.expressionNode(),
+            .prefix => |prefix| prefix.expressionNode(),
         }
     }
 
     pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) !void {
-        return switch (self.*) {
-            .identifier => |ident| ident.string(writer),
+        switch (self.*) {
+            .identifier => |ident| try ident.string(writer),
             .integer_literal => |int| try int.string(writer),
-        };
+            .prefix => |prefix| try prefix.string(writer),
+        }
     }
 };
 
@@ -210,6 +214,26 @@ pub const IntegerLiteral = struct {
 
     pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) !void {
         try writer.writeAll(self._token.literal);
+    }
+};
+
+pub const PrefixExpression = struct {
+    _token: token.Token,
+    operator: []const u8,
+    right: *Expression,
+
+    pub fn tokenLiteral(self: *const PrefixExpression) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const PrefixExpression) void {}
+
+    pub fn string(self: *const PrefixExpression, writer: *std.ArrayList(u8).Writer) !void {
+        try writer.writeByte('(');
+        try writer.writeAll(self.operator);
+        const exp_string = try self.right.string(writer);
+        try writer.writeAll(exp_string);
+        try writer.writeByte(')');
     }
 };
 

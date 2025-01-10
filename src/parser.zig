@@ -418,6 +418,45 @@ const Expected = struct {
     expected_identifiers: []const u8,
 };
 
+test "Parsing Prefix Expression" {
+    const PrefixTest = struct {
+        input: []const u8,
+        operator: []const u8,
+        integer_value: i64,
+    };
+
+    const prefix_tests = [_]PrefixTest{
+        .{ .input = "!5;", .operator = "!", .integer_value = 5 },
+        .{ .input = "-15", .operator = "-", .integer_value = 15 },
+    };
+
+    for (prefix_tests) |prefix_test| {
+        var l = Lexer.init(prefix_test.input);
+        var p = try Parser.init(&l, testing.allocator);
+        try checkParserErrors(&p);
+
+        const program = try p.parseProgram();
+
+        const stmts = program.statements;
+        try testing.expectEqual(1, stmts.len);
+
+        switch (stmts[0]) {
+            .let_statement => @panic(""),
+            .return_statement => @panic(""),
+            .expression_statement => |exp_stmt| {
+                switch (exp_stmt.expression.?) {
+                    .identifier => @panic(""),
+                    .integer_literal => @panic(""),
+                    .prefix => |exp| {
+                        try testing.expectEqualStrings(exp.operator, prefix_test.operator);
+                        try testing.expect(testIntegerLiteral(exp.right, prefix_test.integer_value));
+                    },
+                }
+            },
+        }
+    }
+}
+
 fn checkParserErrors(p: *const Parser) !void {
     const errors = p.getErrors();
     if (errors.len == 0) {
@@ -454,6 +493,23 @@ fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
         std.debug.print("let_stmt.name.tokenLiteral not {s}. got={s}", .{ expected, let_stmt.name.tokenLiteral() });
         return false;
     };
+
+    return true;
+}
+
+fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
+    const integer_literal: ast.IntegerLiteral = switch (il) {
+        .integer_literal => il.integer_literal,
+        else => @panic(""),
+    };
+
+    if (integer_literal.value != value) {
+        return false;
+    }
+
+    if (!std.mem.eql(u8, integer_literal.tokenLiteral, std.fmt.comptimePrint("{d}", .{value}))) {
+        return false;
+    }
 
     return true;
 }
