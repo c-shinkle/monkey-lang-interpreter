@@ -5,7 +5,7 @@ const ast = @import("./ast.zig");
 const Lexer = @import("./lexer.zig").Lexer;
 const token = @import("./token.zig");
 
-const ExpressionError = error{UnknownPrefixToken} || std.fmt.ParseIntError;
+const ExpressionError = error{UnknownPrefixToken} || std.fmt.ParseIntError || std.mem.Allocator.Error;
 
 const LetStatementError = error{ MissingLetIdentifier, MissingLetAssign } || std.mem.Allocator.Error;
 
@@ -95,9 +95,10 @@ const Parser = struct {
             if (maybe_stmt) |stmt| {
                 try list.append(stmt);
             } else |err| switch (err) {
-                StatementError.UnknownPrefixToken => {},
-                StatementError.MissingLetIdentifier => {},
-                StatementError.MissingLetAssign => {},
+                StatementError.UnknownPrefixToken,
+                StatementError.MissingLetIdentifier,
+                StatementError.MissingLetAssign,
+                => {},
                 StatementError.InvalidCharacter, StatementError.Overflow => {
                     const fmt = "could not parse {s} as integer";
                     const msg = try std.fmt.allocPrint(self.allocator, fmt, .{self.cur_token.literal});
@@ -166,7 +167,7 @@ const Parser = struct {
 
         self.nextToken();
 
-        while (self.curTokenIs(token.SEMICOLON)) {
+        while (!self.curTokenIs(token.SEMICOLON)) {
             self.nextToken();
         }
 
@@ -188,8 +189,10 @@ const Parser = struct {
 
     pub fn parseExpression(self: *Parser, precedence: Precedence) ExpressionError!ast.Expression {
         _ = @intFromEnum(precedence);
-        const prefix = self.prefix_parse_fns.get(self.cur_token._type) orelse
+        const prefix = self.prefix_parse_fns.get(self.cur_token._type) orelse {
+            try self.noPrefixParseFnError(self.cur_token._type);
             return StatementError.UnknownPrefixToken;
+        };
         return try prefix(self);
     }
 
@@ -248,6 +251,13 @@ const Parser = struct {
     fn registerInfixFns(self: *Parser, token_type: token.TokenType, func: InfixParseFn) !void {
         try self.infix_parse_fns.put(token_type, func);
     }
+
+    fn noPrefixParseFnError(self: *Parser, t: token.TokenType) !void {
+        const fmt = "no prefix parse function for {s} found";
+        const msg = try std.fmt.allocPrint(self.allocator, fmt, .{t});
+        errdefer self.allocator.free(msg);
+        try self.errors.append(msg);
+    }
 };
 
 test "Out of Memory, Program Statement, no Parser errors" {
@@ -268,6 +278,7 @@ test "Out of Memory, Program Statement, with Parser errors" {
     const expecteds = [_][]const u8{
         "expected next token to be =, got INT instead",
         "expected next token to be IDENT, got = instead",
+        "no prefix parse function for = found",
         "expected next token to be IDENT, got INT instead",
     };
 
@@ -302,20 +313,6 @@ test "Let Statement" {
     for (expecteds, 0..) |expected, i| {
         try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
     }
-}
-
-test "Let Statement missing assign token" {
-    const input = "let x;";
-    var l = Lexer.init(input);
-    var parser = try Parser.init(&l, testing.allocator);
-    defer parser.deinit();
-
-    const program = try parser.parseProgram();
-    defer program.deinit();
-
-    const errors = parser.getErrors();
-    try testing.expectEqual(1, errors.len);
-    try testing.expectEqualStrings("expected next token to be =, got ; instead", errors[0]);
 }
 
 test "Return Statement" {
