@@ -171,12 +171,14 @@ pub const Expression = union(enum) {
     identifier: Identifier,
     integer_literal: IntegerLiteral,
     prefix_expression: PrefixExpression,
+    infix_expression: InfixExpression,
 
     pub fn tokenLiteral(self: *const Expression) []const u8 {
         return switch (self.*) {
             .identifier => |ident| ident.tokenLiteral(),
             .integer_literal => |int| int.tokenLiteral(),
             .prefix_expression => |prefix| prefix.tokenLiteral(),
+            .infix_expression => |infix| infix.tokenLiteral(),
         };
     }
 
@@ -185,6 +187,7 @@ pub const Expression = union(enum) {
             .identifier => |ident| ident.expressionNode(),
             .integer_literal => |int| int.expressionNode(),
             .prefix_expression => |prefix| prefix.expressionNode(),
+            .infix_expression => |infix| infix.expressionNode(),
         }
     }
 
@@ -193,6 +196,7 @@ pub const Expression = union(enum) {
             .identifier => |ident| try ident.string(writer),
             .integer_literal => |int| try int.string(writer),
             .prefix_expression => |prefix| try prefix.string(writer),
+            .infix_expression => |infix| try infix.string(writer),
         }
     }
 
@@ -202,6 +206,12 @@ pub const Expression = union(enum) {
             .prefix_expression => |prefix| {
                 // prefix.right.deinit();
                 allocator.destroy(prefix.right);
+            },
+            .infix_expression => |infix| {
+                // infix.right.deinit(allocator);
+                // infix.left.deinit(allocator);
+                allocator.destroy(infix.right);
+                allocator.destroy(infix.left);
             },
         }
     }
@@ -251,6 +261,29 @@ pub const PrefixExpression = struct {
     pub fn string(self: *const PrefixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeByte('(');
         try writer.writeAll(self.operator);
+        try self.right.string(writer);
+        try writer.writeByte(')');
+    }
+};
+
+pub const InfixExpression = struct {
+    _token: token.Token,
+    left: *Expression,
+    operator: []const u8,
+    right: *Expression,
+
+    pub fn tokenLiteral(self: *const InfixExpression) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const InfixExpression) void {}
+
+    pub fn string(self: *const InfixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
+        try writer.writeByte('(');
+        try self.left.string(writer);
+        try writer.writeByte(' ');
+        try writer.writeAll(self.operator);
+        try writer.writeByte(' ');
         try self.right.string(writer);
         try writer.writeByte(')');
     }

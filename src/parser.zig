@@ -14,7 +14,7 @@ const StatementError = ExpressionError || LetStatementError;
 const ProgramError = std.mem.Allocator.Error || std.fmt.AllocPrintError;
 
 const PrefixParseFn = *const fn (self: *Parser) ExpressionError!ast.Expression;
-const InfixParseFn = *const fn (self: *const Parser, lhs: ast.Expression) ExpressionError!ast.Expression;
+const InfixParseFn = *const fn (self: *Parser, lhs: ast.Expression) ExpressionError!ast.Expression;
 
 const Precedence = enum {
     LOWEST,
@@ -25,6 +25,17 @@ const Precedence = enum {
     PREFIX,
     CALL,
 };
+
+const precedences = std.StaticStringMap(Precedence).initComptime(.{
+    .{ token.EQ, Precedence.EQUALS },
+    .{ token.NOT_EQ, Precedence.EQUALS },
+    .{ token.LT, Precedence.LESSGREATER },
+    .{ token.GT, Precedence.LESSGREATER },
+    .{ token.PLUS, Precedence.SUM },
+    .{ token.MINUS, Precedence.SUM },
+    .{ token.SLASH, Precedence.PRODUCT },
+    .{ token.ASTERISK, Precedence.PRODUCT },
+});
 
 const Parser = struct {
     lexer: *Lexer,
@@ -53,6 +64,15 @@ const Parser = struct {
         try p.registerPrefixFns(token.INT, parseIntegerLiteral);
         try p.registerPrefixFns(token.BANG, parsePrefixExpression);
         try p.registerPrefixFns(token.MINUS, parsePrefixExpression);
+
+        try p.registerInfixFns(token.PLUS, parseInfixExpression);
+        try p.registerInfixFns(token.MINUS, parseInfixExpression);
+        try p.registerInfixFns(token.SLASH, parseInfixExpression);
+        try p.registerInfixFns(token.ASTERISK, parseInfixExpression);
+        try p.registerInfixFns(token.EQ, parseInfixExpression);
+        try p.registerInfixFns(token.NOT_EQ, parseInfixExpression);
+        try p.registerInfixFns(token.LT, parseInfixExpression);
+        try p.registerInfixFns(token.GT, parseInfixExpression);
 
         p.nextToken();
         p.nextToken();
@@ -228,6 +248,29 @@ const Parser = struct {
         } };
     }
 
+    fn parseInfixExpression(self: *Parser, lhs: ast.Expression) ExpressionError!ast.Expression {
+        const _token = self.cur_token;
+        const operator = self.cur_token.literal;
+
+        const precedence = self.curPrecedence();
+        self.nextToken();
+
+        const left = try self.allocator.create(ast.Expression);
+        errdefer self.allocator.destroy(left);
+        left.* = lhs;
+
+        const right = try self.allocator.create(ast.Expression);
+        errdefer self.allocator.destroy(right);
+        right.* = try self.parseExpression(precedence);
+
+        return ast.Expression{ .infix_expression = ast.InfixExpression{
+            ._token = _token,
+            .left = left,
+            .operator = operator,
+            .right = right,
+        } };
+    }
+
     // Helper Methods
 
     fn nextToken(self: *Parser) void {
@@ -276,6 +319,14 @@ const Parser = struct {
         const msg = try std.fmt.allocPrint(self.allocator, fmt, .{t});
         errdefer self.allocator.free(msg);
         try self.errors.append(msg);
+    }
+
+    fn peekPrecedence(self: *const Parser) Precedence {
+        return precedences.get(self.peek_token._type) orelse Precedence.LOWEST;
+    }
+
+    fn curPrecedence(self: *const Parser) Precedence {
+        return precedences.get(self.cur_token._type) orelse Precedence.LOWEST;
     }
 };
 
@@ -469,6 +520,67 @@ test "Prefix Expression" {
     }
 }
 
+test "Infix Expression" {
+    const InfixTest = struct {
+        input: []const u8,
+        left_value: i64,
+        operator: []const u8,
+        right_value: i64,
+    };
+    const infixTests = [_]InfixTest{
+        .{ .input = "5 + 5;", .left_value = 5, .operator = "+", .right_value = 5 },
+        .{ .input = "5 - 5;", .left_value = 5, .operator = "-", .right_value = 5 },
+        .{ .input = "5 * 5;", .left_value = 5, .operator = "*", .right_value = 5 },
+        .{ .input = "5 / 5;", .left_value = 5, .operator = "/", .right_value = 5 },
+        .{ .input = "5 > 5;", .left_value = 5, .operator = ">", .right_value = 5 },
+        .{ .input = "5 < 5;", .left_value = 5, .operator = "<", .right_value = 5 },
+        .{ .input = "5 == 5;", .left_value = 5, .operator = "==", .right_value = 5 },
+        .{ .input = "5 != 5;", .left_value = 5, .operator = "!=", .right_value = 5 },
+        // {"foobar + barfoo;", "foobar", "+", "barfoo"},
+        // {"foobar - barfoo;", "foobar", "-", "barfoo"},
+        // {"foobar * barfoo;", "foobar", "*", "barfoo"},
+        // {"foobar / barfoo;", "foobar", "/", "barfoo"},
+        // {"foobar > barfoo;", "foobar", ">", "barfoo"},
+        // {"foobar < barfoo;", "foobar", "<", "barfoo"},
+        // {"foobar == barfoo;", "foobar", "==", "barfoo"},
+        // {"foobar != barfoo;", "foobar", "!=", "barfoo"},
+        // {"true == true", true, "==", true},
+        // {"true != false", true, "!=", false},
+        // {"false == false", false, "==", false},
+    };
+
+    for (infixTests) |infix_test| {
+        var l = Lexer.init(infix_test.input);
+        var parser = try Parser.init(&l, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+
+        try checkParserErrors(&parser);
+
+        const stmts = program.statements;
+        try testing.expectEqual(1, stmts.len);
+
+        const stmt = switch (stmts[0]) {
+            .expression_statement => |exp_stmt| exp_stmt,
+            else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        };
+
+        const exp = switch (stmt.expression.?) {
+            .infix_expression => |infix| infix,
+            else => |exp| {
+                const fmt = "exp is not ast.InfixExpression. got={s}";
+                const type_name = @typeName(@TypeOf(exp));
+                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+            },
+        };
+
+        try testing.expect(testIntegerLiteral(exp.left.*, infix_test.left_value));
+        try testing.expectEqualStrings(infix_test.operator, exp.operator);
+        try testing.expect(testIntegerLiteral(exp.right.*, infix_test.right_value));
+    }
+}
+
 const Expected = struct {
     expected_identifiers: []const u8,
 };
@@ -534,6 +646,15 @@ fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
     };
     return true;
 }
+
+// fn testInfixExpression(
+//     exp: ast.Expression,
+//     left: ast.Expression,
+//     operator: []const u8,
+//     right: ast.Expression,
+// ) bool {
+
+// }
 
 fn outOfMemoryTest(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
     var lexer = Lexer.init(input);
