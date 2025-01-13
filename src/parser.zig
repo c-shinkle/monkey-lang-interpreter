@@ -51,6 +51,8 @@ const Parser = struct {
 
         try p.registerPrefixFns(token.IDENT, parseIdentifier);
         try p.registerPrefixFns(token.INT, parseIntegerLiteral);
+        try p.registerPrefixFns(token.BANG, parsePrefixExpression);
+        try p.registerPrefixFns(token.MINUS, parsePrefixExpression);
 
         p.nextToken();
         p.nextToken();
@@ -207,6 +209,23 @@ const Parser = struct {
 
         const integer_literal = ast.IntegerLiteral{ ._token = cur_token, .value = value };
         return ast.Expression{ .integer_literal = integer_literal };
+    }
+
+    fn parsePrefixExpression(self: *Parser) ExpressionError!ast.Expression {
+        const _token = self.cur_token;
+        const operator = self.cur_token.literal;
+
+        self.nextToken();
+
+        const right = try self.allocator.create(ast.Expression);
+        errdefer self.allocator.destroy(right);
+        right.* = try self.parseExpression(Precedence.PREFIX);
+
+        return ast.Expression{ .prefix_expression = ast.PrefixExpression{
+            ._token = _token,
+            .operator = operator,
+            .right = right,
+        } };
     }
 
     // Helper Methods
@@ -411,6 +430,45 @@ test "Integer Literal Expression" {
     try testing.expectEqualStrings("5", literal.tokenLiteral());
 }
 
+test "Prefix Expression" {
+    const PrefixTest = struct {
+        input: []const u8,
+        operator: []const u8,
+        integer_value: i64,
+    };
+
+    const prefix_tests = [_]PrefixTest{
+        .{ .input = "!5;", .operator = "!", .integer_value = 5 },
+        .{ .input = "-15;", .operator = "-", .integer_value = 15 },
+    };
+
+    for (prefix_tests) |prefix_test| {
+        var l = Lexer.init(prefix_test.input);
+        var parser = try Parser.init(&l, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        const stmt = program.statements;
+        try testing.expectEqual(1, stmt.len);
+
+        const prefix_stmt: ast.ExpressionStatement = switch (stmt[0]) {
+            .expression_statement => |exp_stmt| exp_stmt,
+            else => @panic("statement is not ast.ExpressionStatement"),
+        };
+        const exp: ast.PrefixExpression = switch (prefix_stmt.expression.?) {
+            .prefix_expression => |prefix| prefix,
+            else => @panic("statement was not ast.PrefixExpression"),
+        };
+
+        try testing.expectEqualStrings(prefix_test.operator, exp.operator);
+        if (!testIntegerLiteral(exp.right.*, prefix_test.integer_value)) {
+            @panic("");
+        }
+    }
+}
+
 const Expected = struct {
     expected_identifiers: []const u8,
 };
@@ -452,6 +510,28 @@ fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
         return false;
     };
 
+    return true;
+}
+
+fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
+    const integ = switch (il) {
+        .integer_literal => |integer| integer,
+        else => |exp| {
+            std.debug.print("il not ast.IntegerLiteral. got={s}", .{@typeName(@TypeOf(exp))});
+            return false;
+        },
+    };
+
+    testing.expectEqual(value, integ.value) catch {
+        std.debug.print("integ.value not {d}. got={d}", .{ value, integ.value });
+        return false;
+    };
+    const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return false;
+    defer testing.allocator.free(integer_literal);
+    testing.expectEqualStrings(integer_literal, integ.tokenLiteral()) catch {
+        std.debug.print("integ.TokenLiteral not {d}. got={d}", .{ integer_literal, integ.tokenLiteral() });
+        return false;
+    };
     return true;
 }
 
