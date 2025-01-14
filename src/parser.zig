@@ -210,12 +210,23 @@ const Parser = struct {
     // Expression
 
     pub fn parseExpression(self: *Parser, precedence: Precedence) ExpressionError!ast.Expression {
-        _ = @intFromEnum(precedence);
+        const precedence_int = @intFromEnum(precedence);
         const prefix = self.prefix_parse_fns.get(self.cur_token._type) orelse {
             try self.noPrefixParseFnError(self.cur_token._type);
             return StatementError.UnknownPrefixToken;
         };
-        return try prefix(self);
+
+        var left_exp = try prefix(self);
+
+        while (!self.peekTokenIs(token.SEMICOLON) and precedence_int < @intFromEnum(self.peekPrecedence())) {
+            const infix = self.infix_parse_fns.get(self.peek_token._type) orelse return left_exp;
+
+            self.nextToken();
+
+            left_exp = try infix(self, left_exp);
+        }
+
+        return left_exp;
     }
 
     fn parseIdentifier(self: *const Parser) ExpressionError!ast.Expression {
