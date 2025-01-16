@@ -120,7 +120,6 @@ pub const LetStatement = struct {
         } else {
             try writer.writeAll("null");
         }
-        try writer.writeByte(';');
     }
 };
 
@@ -143,7 +142,6 @@ pub const ReturnStatement = struct {
         } else {
             try writer.writeAll("null");
         }
-        try writer.writeByte(';');
     }
 };
 
@@ -160,9 +158,8 @@ pub const ExpressionStatement = struct {
     pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
         if (self.expression) |expression| {
             try expression.string(writer);
-            try writer.writeByte(';');
         } else {
-            try writer.writeAll("null;");
+            try writer.writeAll("null");
         }
     }
 };
@@ -204,13 +201,13 @@ pub const Expression = union(enum) {
         switch (self) {
             .identifier, .integer_literal => {},
             .prefix_expression => |prefix| {
-                // prefix.right.deinit();
+                prefix.right.deinit(allocator);
                 allocator.destroy(prefix.right);
             },
             .infix_expression => |infix| {
-                // infix.right.deinit(allocator);
-                // infix.left.deinit(allocator);
+                infix.right.deinit(allocator);
                 allocator.destroy(infix.right);
+                infix.left.deinit(allocator);
                 allocator.destroy(infix.left);
             },
         }
@@ -317,14 +314,18 @@ test "ast foo" {
     };
     defer program.deinit();
 
-    const node = Node{
-        .program = program,
-    };
-
     var string = std.ArrayList(u8).init(allocator);
     defer string.deinit();
-
     var writer = string.writer();
-    try node.string(&writer);
-    try testing.expectEqualStrings("let x = 10;10;return x;", string.items);
+
+    try program.statements[0].string(&writer);
+    try testing.expectEqualStrings("let x = 10", string.items);
+
+    string.clearRetainingCapacity();
+    try program.statements[1].string(&writer);
+    try testing.expectEqualStrings("10", string.items);
+
+    string.clearRetainingCapacity();
+    try program.statements[2].string(&writer);
+    try testing.expectEqualStrings("return x", string.items);
 }

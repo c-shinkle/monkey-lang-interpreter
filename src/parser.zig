@@ -48,7 +48,7 @@ const Parser = struct {
 
     // Initialization
 
-    pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) !Parser {
+    pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) std.mem.Allocator.Error!Parser {
         var p = Parser{
             .lexer = lexer,
             .cur_token = undefined,
@@ -532,13 +532,12 @@ test "Prefix Expression" {
 }
 
 test "Infix Expression" {
-    const InfixTest = struct {
+    const infixTests = [_]struct {
         input: []const u8,
         left_value: i64,
         operator: []const u8,
         right_value: i64,
-    };
-    const infixTests = [_]InfixTest{
+    }{
         .{ .input = "5 + 5;", .left_value = 5, .operator = "+", .right_value = 5 },
         .{ .input = "5 - 5;", .left_value = 5, .operator = "-", .right_value = 5 },
         .{ .input = "5 * 5;", .left_value = 5, .operator = "*", .right_value = 5 },
@@ -658,14 +657,131 @@ fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
     return true;
 }
 
-// fn testInfixExpression(
-//     exp: ast.Expression,
-//     left: ast.Expression,
-//     operator: []const u8,
-//     right: ast.Expression,
-// ) bool {
+test "Operator Precedence" {
+    const string_tests = [_]struct {
+        input: []const u8,
+        expected: []const u8,
+    }{
+        .{
+            .input = "-a * b",
+            .expected = "((-a) * b)",
+        },
+        .{
+            .input = "!-a",
+            .expected = "(!(-a))",
+        },
+        .{
+            .input = "a + b + c",
+            .expected = "((a + b) + c)",
+        },
+        .{
+            .input = "a + b - c",
+            .expected = "((a + b) - c)",
+        },
+        .{
+            .input = "a * b * c",
+            .expected = "((a * b) * c)",
+        },
+        .{
+            .input = "a * b / c",
+            .expected = "((a * b) / c)",
+        },
+        .{
+            .input = "a + b / c",
+            .expected = "(a + (b / c))",
+        },
+        .{
+            .input = "a + b * c + d / e - f",
+            .expected = "(((a + (b * c)) + (d / e)) - f)",
+        },
+        .{
+            .input = "3 + 4; -5 * 5",
+            .expected = "(3 + 4)((-5) * 5)",
+        },
+        .{
+            .input = "5 > 4 == 3 < 4",
+            .expected = "((5 > 4) == (3 < 4))",
+        },
+        .{
+            .input = "5 < 4 != 3 > 4",
+            .expected = "((5 < 4) != (3 > 4))",
+        },
+        .{
+            .input = "3 + 4 * 5 == 3 * 1 + 4 * 5",
+            .expected = "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+        },
+        // .{
+        //     .input = "true",
+        //     .expected = "true",
+        // },
+        // .{
+        //     .input = "false",
+        //     .expected = "false",
+        // },
+        // .{
+        //     .input = "3 > 5 == false",
+        //     .expected = "((3 > 5) == false)",
+        // },
+        // .{
+        //     .input = "3 < 5 == true",
+        //     .expected = "((3 < 5) == true)",
+        // },
+        // .{
+        //     .input = "1 + (2 + 3) + 4",
+        //     .expected = "((1 + (2 + 3)) + 4)",
+        // },
+        // .{
+        //     .input = "(5 + 5) * 2",
+        //     .expected = "((5 + 5) * 2)",
+        // },
+        // .{
+        //     .input = "2 / (5 + 5)",
+        //     .expected = "(2 / (5 + 5))",
+        // },
+        // .{
+        //     .input = "(5 + 5) * 2 * (5 + 5)",
+        //     .expected = "(((5 + 5) * 2) * (5 + 5))",
+        // },
+        // .{
+        //     .input = "-(5 + 5)",
+        //     .expected = "(-(5 + 5))",
+        // },
+        // .{
+        //     .input = "!(true == true)",
+        //     .expected = "(!(true == true))",
+        // },
+        // .{
+        //     .input = "a + add(b * c) + d",
+        //     .expected = "((a + add((b * c))) + d)",
+        // },
+        // .{
+        //     .input = "add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))",
+        //     .expected = "add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))",
+        // },
+        // .{
+        //     .input = "add(a + b + c * d / f + g)",
+        //     .expected = "add((((a + b) + ((c * d) / f)) + g))",
+        // },
+    };
 
-// }
+    var array_list = std.ArrayList(u8).init(testing.allocator);
+    defer array_list.deinit();
+    var writer = array_list.writer();
+
+    for (string_tests) |string_test| {
+        var lexer = Lexer.init(string_test.input);
+        var parser = try Parser.init(&lexer, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        try program.string(&writer);
+        try testing.expectEqualStrings(string_test.expected, array_list.items);
+
+        array_list.clearRetainingCapacity();
+    }
+}
 
 fn outOfMemoryTest(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
     var lexer = Lexer.init(input);
