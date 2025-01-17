@@ -60,19 +60,19 @@ const Parser = struct {
         };
         errdefer p.deinit();
 
-        try p.registerPrefixFns(token.IDENT, parseIdentifier);
-        try p.registerPrefixFns(token.INT, parseIntegerLiteral);
-        try p.registerPrefixFns(token.BANG, parsePrefixExpression);
-        try p.registerPrefixFns(token.MINUS, parsePrefixExpression);
+        try p.prefix_parse_fns.put(token.IDENT, parseIdentifier);
+        try p.prefix_parse_fns.put(token.INT, parseIntegerLiteral);
+        try p.prefix_parse_fns.put(token.BANG, parsePrefixExpression);
+        try p.prefix_parse_fns.put(token.MINUS, parsePrefixExpression);
 
-        try p.registerInfixFns(token.PLUS, parseInfixExpression);
-        try p.registerInfixFns(token.MINUS, parseInfixExpression);
-        try p.registerInfixFns(token.SLASH, parseInfixExpression);
-        try p.registerInfixFns(token.ASTERISK, parseInfixExpression);
-        try p.registerInfixFns(token.EQ, parseInfixExpression);
-        try p.registerInfixFns(token.NOT_EQ, parseInfixExpression);
-        try p.registerInfixFns(token.LT, parseInfixExpression);
-        try p.registerInfixFns(token.GT, parseInfixExpression);
+        try p.infix_parse_fns.put(token.PLUS, parseInfixExpression);
+        try p.infix_parse_fns.put(token.MINUS, parseInfixExpression);
+        try p.infix_parse_fns.put(token.SLASH, parseInfixExpression);
+        try p.infix_parse_fns.put(token.ASTERISK, parseInfixExpression);
+        try p.infix_parse_fns.put(token.EQ, parseInfixExpression);
+        try p.infix_parse_fns.put(token.NOT_EQ, parseInfixExpression);
+        try p.infix_parse_fns.put(token.LT, parseInfixExpression);
+        try p.infix_parse_fns.put(token.GT, parseInfixExpression);
 
         p.nextToken();
         p.nextToken();
@@ -306,23 +306,11 @@ const Parser = struct {
         }
     }
 
-    pub fn getErrors(self: *const Parser) [][]const u8 {
-        return self.errors.items;
-    }
-
     fn peekErrors(self: *Parser, t: token.TokenType) !void {
         const fmt = "expected next token to be {s}, got {s} instead";
         const msg = try std.fmt.allocPrint(self.allocator, fmt, .{ t, self.peek_token._type });
         errdefer self.allocator.free(msg);
         try self.errors.append(msg);
-    }
-
-    fn registerPrefixFns(self: *Parser, token_type: token.TokenType, func: PrefixParseFn) !void {
-        try self.prefix_parse_fns.put(token_type, func);
-    }
-
-    fn registerInfixFns(self: *Parser, token_type: token.TokenType, func: InfixParseFn) !void {
-        try self.infix_parse_fns.put(token_type, func);
     }
 
     fn noPrefixParseFnError(self: *Parser, t: token.TokenType) !void {
@@ -341,12 +329,14 @@ const Parser = struct {
     }
 };
 
+// Test Suite
+
 test "Out of Memory, Program Statement, no Parser errors" {
     const input = "let x = 5;";
 
     const expecteds = [_]Expected{.{ .expected_identifiers = "x" }};
 
-    try testing.checkAllAllocationFailures(testing.allocator, outOfMemoryTest, .{ input, &expecteds });
+    try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{ input, &expecteds });
 }
 
 test "Out of Memory, Program Statement, with Parser errors" {
@@ -363,7 +353,7 @@ test "Out of Memory, Program Statement, with Parser errors" {
         "expected next token to be IDENT, got INT instead",
     };
 
-    try testing.checkAllAllocationFailures(testing.allocator, outOfMemoryWithParserErrorsTest, .{ input, &expecteds });
+    try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemoryWithParserErrors, .{ input, &expecteds });
 }
 
 test "Let Statement" {
@@ -571,90 +561,20 @@ test "Infix Expression" {
         const stmts = program.statements;
         try testing.expectEqual(1, stmts.len);
 
-        const stmt = switch (stmts[0]) {
+        const exp_stmt = switch (stmts[0]) {
             .expression_statement => |exp_stmt| exp_stmt,
             else => @panic("stmts[0] is not ast.ExpressionStatement"),
         };
 
-        const exp = switch (stmt.expression.?) {
-            .infix_expression => |infix| infix,
-            else => |exp| {
-                const fmt = "exp is not ast.InfixExpression. got={s}";
-                const type_name = @typeName(@TypeOf(exp));
-                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-            },
-        };
-
-        try testing.expect(testIntegerLiteral(exp.left.*, infix_test.left_value));
-        try testing.expectEqualStrings(infix_test.operator, exp.operator);
-        try testing.expect(testIntegerLiteral(exp.right.*, infix_test.right_value));
+        if (!testInfixExpression(
+            exp_stmt.expression.?,
+            infix_test.left_value,
+            infix_test.operator,
+            infix_test.right_value,
+        )) {
+            @panic("");
+        }
     }
-}
-
-const Expected = struct {
-    expected_identifiers: []const u8,
-};
-
-fn checkParserErrors(p: *const Parser) !void {
-    const errors = p.getErrors();
-    if (errors.len == 0) {
-        return;
-    }
-
-    std.debug.print("parser has {d} errors\n", .{errors.len});
-    for (errors) |msg| {
-        std.debug.print("parser error: {s}\n", .{msg});
-    }
-    return error.FoundParserErrors;
-}
-
-fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
-    if (!std.mem.eql(u8, s.tokenLiteral(), "let")) {
-        std.debug.print("s.tokenLiteral not \"let\". got={s}", .{s.tokenLiteral()});
-        return false;
-    }
-
-    var let_stmt: ast.LetStatement = switch (s) {
-        .let_statement => s.let_statement,
-        else => {
-            std.debug.print("s is not *ast.LetStatement. got={s}", .{@typeName(@TypeOf(s))});
-            return false;
-        },
-    };
-
-    testing.expectEqualStrings(expected, let_stmt.name.value) catch {
-        std.debug.print("let_stmt.name.value not {s}. got={s}", .{ expected, let_stmt.name.value });
-        return false;
-    };
-
-    testing.expectEqualStrings(expected, let_stmt.name.tokenLiteral()) catch {
-        std.debug.print("let_stmt.name.tokenLiteral not {s}. got={s}", .{ expected, let_stmt.name.tokenLiteral() });
-        return false;
-    };
-
-    return true;
-}
-
-fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
-    const integ = switch (il) {
-        .integer_literal => |integer| integer,
-        else => |exp| {
-            std.debug.print("il not ast.IntegerLiteral. got={s}", .{@typeName(@TypeOf(exp))});
-            return false;
-        },
-    };
-
-    testing.expectEqual(value, integ.value) catch {
-        std.debug.print("integ.value not {d}. got={d}", .{ value, integ.value });
-        return false;
-    };
-    const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return false;
-    defer testing.allocator.free(integer_literal);
-    testing.expectEqualStrings(integer_literal, integ.tokenLiteral()) catch {
-        std.debug.print("integ.TokenLiteral not {d}. got={d}", .{ integer_literal, integ.tokenLiteral() });
-        return false;
-    };
-    return true;
 }
 
 test "Operator Precedence" {
@@ -783,7 +703,134 @@ test "Operator Precedence" {
     }
 }
 
-fn outOfMemoryTest(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
+//Test Helpers
+
+const Expected = struct {
+    expected_identifiers: []const u8,
+};
+
+fn checkParserErrors(p: *const Parser) !void {
+    const errors = p.errors.items;
+    if (errors.len == 0) {
+        return;
+    }
+
+    std.debug.print("parser has {d} errors\n", .{errors.len});
+    for (errors) |msg| {
+        std.debug.print("parser error: {s}\n", .{msg});
+    }
+    return error.FoundParserErrors;
+}
+
+fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
+    if (!std.mem.eql(u8, s.tokenLiteral(), "let")) {
+        std.debug.print("s.tokenLiteral not \"let\". got={s}", .{s.tokenLiteral()});
+        return false;
+    }
+
+    var let_stmt: ast.LetStatement = switch (s) {
+        .let_statement => s.let_statement,
+        else => {
+            std.debug.print("s is not *ast.LetStatement. got={s}", .{@typeName(@TypeOf(s))});
+            return false;
+        },
+    };
+
+    testing.expectEqualStrings(expected, let_stmt.name.value) catch {
+        std.debug.print("let_stmt.name.value not {s}. got={s}", .{ expected, let_stmt.name.value });
+        return false;
+    };
+
+    testing.expectEqualStrings(expected, let_stmt.name.tokenLiteral()) catch {
+        std.debug.print("let_stmt.name.tokenLiteral not {s}. got={s}", .{ expected, let_stmt.name.tokenLiteral() });
+        return false;
+    };
+
+    return true;
+}
+
+fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
+    const integ = switch (il) {
+        .integer_literal => |integer| integer,
+        else => |exp| {
+            std.debug.print("il not ast.IntegerLiteral. got={s}", .{@typeName(@TypeOf(exp))});
+            return false;
+        },
+    };
+
+    testing.expectEqual(value, integ.value) catch {
+        std.debug.print("integ.value not {d}. got={d}", .{ value, integ.value });
+        return false;
+    };
+    const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return false;
+    defer testing.allocator.free(integer_literal);
+    testing.expectEqualStrings(integer_literal, integ.tokenLiteral()) catch {
+        std.debug.print("integ.TokenLiteral not {d}. got={d}", .{ integer_literal, integ.tokenLiteral() });
+        return false;
+    };
+    return true;
+}
+
+fn testIdentifier(expression: ast.Expression, value: []const u8) bool {
+    const ident = switch (expression) {
+        .identifier => |ident| ident,
+        else => |exp| {
+            std.debug.print("il not ast.Identifier. got={s}", .{@typeName(@TypeOf(exp))});
+            return false;
+        },
+    };
+
+    testing.expectEqualStrings(ident.value, value) catch {
+        std.debug.print("ident.value not {d}. got={d}", .{ value, ident.value });
+        return false;
+    };
+
+    testing.expectEqualStrings(ident.tokenLiteral(), value) catch {
+        std.debug.print("ident.tokenLiteral() not {d}. got={d}", .{ value, ident.value });
+        return false;
+    };
+
+    return true;
+}
+
+fn testLiteralExpression(exp: ast.Expression, expected: anytype) bool {
+    const Type = @TypeOf(expected);
+    if (Type == i64) {
+        return testIntegerLiteral(exp, expected);
+    }
+    if (Type == []const u8) {
+        return testIdentifier(exp, expected);
+    }
+    std.debug.print("type of exp not handled. got={?s}", .{Type});
+    return false;
+}
+
+fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8, right: anytype) bool {
+    const op_exp: ast.InfixExpression = switch (exp) {
+        .infix_expression => |infix| infix,
+        else => |e| {
+            std.debug.print("exp not ast.InfixExpression. got={s}", .{@typeName(@TypeOf(e))});
+            return false;
+        },
+    };
+
+    if (!testLiteralExpression(op_exp.left.*, left)) {
+        return false;
+    }
+
+    testing.expectEqualStrings(op_exp.operator, operator) catch {
+        std.debug.print("op_exp.operator not {s}. got={s}", .{ operator, op_exp.operator });
+        return false;
+    };
+
+    if (!testLiteralExpression(op_exp.right.*, right)) {
+        return false;
+    }
+
+    return true;
+}
+
+fn testOutOfMemory(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
     var lexer = Lexer.init(input);
     var parser = try Parser.init(&lexer, allocator);
     defer parser.deinit();
@@ -800,7 +847,7 @@ fn outOfMemoryTest(allocator: std.mem.Allocator, input: []const u8, expecteds: [
     }
 }
 
-fn outOfMemoryWithParserErrorsTest(allocator: std.mem.Allocator, input: []const u8, expecteds: []const []const u8) !void {
+fn testOutOfMemoryWithParserErrors(allocator: std.mem.Allocator, input: []const u8, expecteds: []const []const u8) !void {
     var lexer = Lexer.init(input);
     var parser = try Parser.init(&lexer, allocator);
     defer parser.deinit();
@@ -808,7 +855,7 @@ fn outOfMemoryWithParserErrorsTest(allocator: std.mem.Allocator, input: []const 
     const program = try parser.parseProgram();
     defer program.deinit();
 
-    const parser_errors = parser.getErrors();
+    const parser_errors = parser.errors.items;
 
     try testing.expect(expecteds.len == parser_errors.len);
 
