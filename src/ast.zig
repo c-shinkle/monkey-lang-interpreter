@@ -1,7 +1,7 @@
 const std = @import("std");
-const token = @import("./token.zig");
-
 const testing = std.testing;
+
+const token = @import("./token.zig");
 
 pub const StringError = std.ArrayList(u8).Writer.Error;
 
@@ -169,6 +169,7 @@ pub const Expression = union(enum) {
     integer_literal: IntegerLiteral,
     prefix_expression: PrefixExpression,
     infix_expression: InfixExpression,
+    boolean_expression: Boolean,
 
     pub fn tokenLiteral(self: *const Expression) []const u8 {
         return switch (self.*) {
@@ -176,6 +177,7 @@ pub const Expression = union(enum) {
             .integer_literal => |int| int.tokenLiteral(),
             .prefix_expression => |prefix| prefix.tokenLiteral(),
             .infix_expression => |infix| infix.tokenLiteral(),
+            .boolean_expression => |boolean| boolean.tokenLiteral(),
         };
     }
 
@@ -185,6 +187,7 @@ pub const Expression = union(enum) {
             .integer_literal => |int| int.expressionNode(),
             .prefix_expression => |prefix| prefix.expressionNode(),
             .infix_expression => |infix| infix.expressionNode(),
+            .boolean_expression => |boolean| boolean.expressionNode(),
         }
     }
 
@@ -194,12 +197,13 @@ pub const Expression = union(enum) {
             .integer_literal => |int| try int.string(writer),
             .prefix_expression => |prefix| try prefix.string(writer),
             .infix_expression => |infix| try infix.string(writer),
+            .boolean_expression => |boolean| try boolean.string(writer),
         }
     }
 
     pub fn deinit(self: Expression, allocator: std.mem.Allocator) void {
         switch (self) {
-            .identifier, .integer_literal => {},
+            .identifier, .integer_literal, .boolean_expression => {},
             .prefix_expression => |prefix| {
                 prefix.right.deinit(allocator);
                 allocator.destroy(prefix.right);
@@ -283,6 +287,21 @@ pub const InfixExpression = struct {
         try writer.writeByte(' ');
         try self.right.string(writer);
         try writer.writeByte(')');
+    }
+};
+
+pub const Boolean = struct {
+    _token: token.Token,
+    value: bool,
+
+    pub fn tokenLiteral(self: *const Boolean) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const Boolean) void {}
+
+    pub fn string(self: *const Boolean, writer: *std.ArrayList(u8).Writer) StringError!void {
+        try writer.writeAll(self._token.literal);
     }
 };
 

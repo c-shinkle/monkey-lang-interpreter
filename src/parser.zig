@@ -64,6 +64,8 @@ const Parser = struct {
         try p.prefix_parse_fns.put(token.INT, parseIntegerLiteral);
         try p.prefix_parse_fns.put(token.BANG, parsePrefixExpression);
         try p.prefix_parse_fns.put(token.MINUS, parsePrefixExpression);
+        try p.prefix_parse_fns.put(token.TRUE, parseBoolean);
+        try p.prefix_parse_fns.put(token.FALSE, parseBoolean);
 
         try p.infix_parse_fns.put(token.PLUS, parseInfixExpression);
         try p.infix_parse_fns.put(token.MINUS, parseInfixExpression);
@@ -279,6 +281,13 @@ const Parser = struct {
             .left = left,
             .operator = operator,
             .right = right,
+        } };
+    }
+
+    fn parseBoolean(self: *Parser) ExpressionError!ast.Expression {
+        return ast.Expression{ .boolean_expression = ast.Boolean{
+            ._token = self.cur_token,
+            .value = self.curTokenIs(token.TRUE),
         } };
     }
 
@@ -516,13 +525,13 @@ test "Prefix Expression" {
 
         try testing.expectEqualStrings(prefix_test.operator, exp.operator);
         if (!testIntegerLiteral(exp.right.*, prefix_test.integer_value)) {
-            @panic("");
+            unreachable;
         }
     }
 }
 
 test "Infix Expression" {
-    const infixTests = [_]struct {
+    const infixIntegerTests = [_]struct {
         input: []const u8,
         left_value: i64,
         operator: []const u8,
@@ -544,12 +553,9 @@ test "Infix Expression" {
         // {"foobar < barfoo;", "foobar", "<", "barfoo"},
         // {"foobar == barfoo;", "foobar", "==", "barfoo"},
         // {"foobar != barfoo;", "foobar", "!=", "barfoo"},
-        // {"true == true", true, "==", true},
-        // {"true != false", true, "!=", false},
-        // {"false == false", false, "==", false},
     };
 
-    for (infixTests) |infix_test| {
+    for (infixIntegerTests) |infix_test| {
         var l = Lexer.init(infix_test.input);
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
@@ -572,7 +578,45 @@ test "Infix Expression" {
             infix_test.operator,
             infix_test.right_value,
         )) {
-            @panic("");
+            unreachable;
+        }
+    }
+
+    const infixBoolTests = [_]struct {
+        input: []const u8,
+        left_value: bool,
+        operator: []const u8,
+        right_value: bool,
+    }{
+        .{ .input = "true == true", .left_value = true, .operator = "==", .right_value = true },
+        .{ .input = "true != false", .left_value = true, .operator = "!=", .right_value = false },
+        .{ .input = "false == false", .left_value = false, .operator = "==", .right_value = false },
+    };
+
+    for (infixBoolTests) |infix_test| {
+        var l = Lexer.init(infix_test.input);
+        var parser = try Parser.init(&l, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+
+        try checkParserErrors(&parser);
+
+        const stmts = program.statements;
+        try testing.expectEqual(1, stmts.len);
+
+        const exp_stmt = switch (stmts[0]) {
+            .expression_statement => |exp_stmt| exp_stmt,
+            else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        };
+
+        if (!testInfixExpression(
+            exp_stmt.expression.?,
+            infix_test.left_value,
+            infix_test.operator,
+            infix_test.right_value,
+        )) {
+            unreachable;
         }
     }
 }
@@ -687,7 +731,6 @@ test "Operator Precedence" {
     var array_list = std.ArrayList(u8).init(testing.allocator);
     defer array_list.deinit();
     var writer = array_list.writer();
-
     for (string_tests) |string_test| {
         var lexer = Lexer.init(string_test.input);
         var parser = try Parser.init(&lexer, testing.allocator);
@@ -703,11 +746,80 @@ test "Operator Precedence" {
     }
 }
 
+test "Boolean Expression" {
+    const bool_tests = [_]struct {
+        input: []const u8,
+        expected_boolean: bool,
+    }{
+        .{ .input = "true;", .expected_boolean = true },
+        .{ .input = "false;", .expected_boolean = false },
+    };
+
+    for (bool_tests) |bool_test| {
+        var lexer = Lexer.init(bool_test.input);
+        var parser = try Parser.init(&lexer, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        const stmts = program.statements;
+        try testing.expectEqual(1, stmts.len);
+
+        const boolean_expression = switch (stmts[0]) {
+            .expression_statement => |exp_stmt| switch (exp_stmt.expression.?) {
+                .boolean_expression => |boolean| boolean,
+                else => |e| {
+                    std.debug.print("exp not ast.BooleanExpression. got={s}", .{@typeName(@TypeOf(e))});
+                    unreachable;
+                },
+            },
+            else => unreachable,
+        };
+
+        try testing.expectEqual(bool_test.expected_boolean, boolean_expression.value);
+    }
+}
+
 //Test Helpers
 
 const Expected = struct {
     expected_identifiers: []const u8,
 };
+
+fn testOutOfMemory(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, allocator);
+    defer parser.deinit();
+
+    const program = try parser.parseProgram();
+    defer program.deinit();
+
+    try checkParserErrors(&parser);
+
+    try testing.expect(expecteds.len == program.statements.len);
+
+    for (expecteds, 0..) |expected, i| {
+        try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
+    }
+}
+
+fn testOutOfMemoryWithParserErrors(allocator: std.mem.Allocator, input: []const u8, expecteds: []const []const u8) !void {
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, allocator);
+    defer parser.deinit();
+
+    const program = try parser.parseProgram();
+    defer program.deinit();
+
+    const parser_errors = parser.errors.items;
+
+    try testing.expect(expecteds.len == parser_errors.len);
+
+    for (parser_errors, 0..) |parser_error, i| {
+        try testing.expectEqualStrings(expecteds[i], parser_error);
+    }
+}
 
 fn checkParserErrors(p: *const Parser) !void {
     const errors = p.errors.items;
@@ -801,7 +913,13 @@ fn testLiteralExpression(exp: ast.Expression, expected: anytype) bool {
     if (Type == []const u8) {
         return testIdentifier(exp, expected);
     }
-    std.debug.print("type of exp not handled. got={?s}", .{Type});
+    if (Type == bool) {
+        return testBooleanLiteral(exp, expected);
+    }
+    comptime {
+        @compileError("debug");
+    }
+    std.debug.print("type of exp not handled. got={s}", .{@typeName(Type)});
     return false;
 }
 
@@ -830,36 +948,26 @@ fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8,
     return true;
 }
 
-fn testOutOfMemory(allocator: std.mem.Allocator, input: []const u8, expecteds: []const Expected) !void {
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, allocator);
-    defer parser.deinit();
+fn testBooleanLiteral(exp: ast.Expression, value: bool) bool {
+    const bool_exp: ast.Boolean = switch (exp) {
+        .boolean_expression => |boolean| boolean,
+        else => |e| {
+            std.debug.print("exp not ast.Boolean. got={s}", .{@typeName(@TypeOf(e))});
+            return false;
+        },
+    };
 
-    const program = try parser.parseProgram();
-    defer program.deinit();
+    testing.expectEqual(bool_exp.value, value) catch {
+        std.debug.print("bool_exp.value not {}. got={}", .{ value, bool_exp.value });
+        return false;
+    };
 
-    try checkParserErrors(&parser);
+    const actual = std.fmt.allocPrint(testing.allocator, "{any}", .{bool_exp.value}) catch return false;
+    defer testing.allocator.free(actual);
+    testing.expectEqualStrings(bool_exp.tokenLiteral(), actual) catch {
+        std.debug.print("bool_exp.tokenLiteral() not {}. got={s}", .{ value, bool_exp.tokenLiteral() });
+        return false;
+    };
 
-    try testing.expect(expecteds.len == program.statements.len);
-
-    for (expecteds, 0..) |expected, i| {
-        try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
-    }
-}
-
-fn testOutOfMemoryWithParserErrors(allocator: std.mem.Allocator, input: []const u8, expecteds: []const []const u8) !void {
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, allocator);
-    defer parser.deinit();
-
-    const program = try parser.parseProgram();
-    defer program.deinit();
-
-    const parser_errors = parser.errors.items;
-
-    try testing.expect(expecteds.len == parser_errors.len);
-
-    for (parser_errors, 0..) |parser_error, i| {
-        try testing.expectEqualStrings(expecteds[i], parser_error);
-    }
+    return true;
 }
