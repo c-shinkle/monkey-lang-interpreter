@@ -418,7 +418,7 @@ test "Return Statement" {
                 try testing.expectEqualStrings("return", stmt.return_statement.tokenLiteral());
             },
             else => {
-                std.debug.print("stmt is not *ast.ReturnStatement. got={s}", .{@typeName(@TypeOf(stmt))});
+                std.debug.print("stmt is not *ast.ReturnStatement. got={s}\n", .{@typeName(@TypeOf(stmt))});
                 continue;
             },
         }
@@ -492,18 +492,14 @@ test "Integer Literal Expression" {
 }
 
 test "Prefix Expression" {
-    const PrefixTest = struct {
-        input: []const u8,
-        operator: []const u8,
-        integer_value: i64,
+    const prefix_tests = .{
+        .{ .input = "!5;", .operator = "!", .value = 5 },
+        .{ .input = "-15;", .operator = "-", .value = 15 },
+        .{ .input = "!true;", .operator = "!", .value = true },
+        .{ .input = "!false;", .operator = "!", .value = false },
     };
 
-    const prefix_tests = [_]PrefixTest{
-        .{ .input = "!5;", .operator = "!", .integer_value = 5 },
-        .{ .input = "-15;", .operator = "-", .integer_value = 15 },
-    };
-
-    for (prefix_tests) |prefix_test| {
+    inline for (prefix_tests) |prefix_test| {
         var l = Lexer.init(prefix_test.input);
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
@@ -524,19 +520,14 @@ test "Prefix Expression" {
         };
 
         try testing.expectEqualStrings(prefix_test.operator, exp.operator);
-        if (!testIntegerLiteral(exp.right.*, prefix_test.integer_value)) {
+        if (!testLiteralExpression(exp.right.*, prefix_test.value)) {
             unreachable;
         }
     }
 }
 
 test "Infix Expression" {
-    const infixIntegerTests = [_]struct {
-        input: []const u8,
-        left_value: i64,
-        operator: []const u8,
-        right_value: i64,
-    }{
+    const infixBoolTests = .{
         .{ .input = "5 + 5;", .left_value = 5, .operator = "+", .right_value = 5 },
         .{ .input = "5 - 5;", .left_value = 5, .operator = "-", .right_value = 5 },
         .{ .input = "5 * 5;", .left_value = 5, .operator = "*", .right_value = 5 },
@@ -545,55 +536,12 @@ test "Infix Expression" {
         .{ .input = "5 < 5;", .left_value = 5, .operator = "<", .right_value = 5 },
         .{ .input = "5 == 5;", .left_value = 5, .operator = "==", .right_value = 5 },
         .{ .input = "5 != 5;", .left_value = 5, .operator = "!=", .right_value = 5 },
-        // {"foobar + barfoo;", "foobar", "+", "barfoo"},
-        // {"foobar - barfoo;", "foobar", "-", "barfoo"},
-        // {"foobar * barfoo;", "foobar", "*", "barfoo"},
-        // {"foobar / barfoo;", "foobar", "/", "barfoo"},
-        // {"foobar > barfoo;", "foobar", ">", "barfoo"},
-        // {"foobar < barfoo;", "foobar", "<", "barfoo"},
-        // {"foobar == barfoo;", "foobar", "==", "barfoo"},
-        // {"foobar != barfoo;", "foobar", "!=", "barfoo"},
-    };
-
-    for (infixIntegerTests) |infix_test| {
-        var l = Lexer.init(infix_test.input);
-        var parser = try Parser.init(&l, testing.allocator);
-        defer parser.deinit();
-        const program = try parser.parseProgram();
-        defer program.deinit();
-
-        try checkParserErrors(&parser);
-
-        const stmts = program.statements;
-        try testing.expectEqual(1, stmts.len);
-
-        const exp_stmt = switch (stmts[0]) {
-            .expression_statement => |exp_stmt| exp_stmt,
-            else => @panic("stmts[0] is not ast.ExpressionStatement"),
-        };
-
-        if (!testInfixExpression(
-            exp_stmt.expression.?,
-            infix_test.left_value,
-            infix_test.operator,
-            infix_test.right_value,
-        )) {
-            unreachable;
-        }
-    }
-
-    const infixBoolTests = [_]struct {
-        input: []const u8,
-        left_value: bool,
-        operator: []const u8,
-        right_value: bool,
-    }{
         .{ .input = "true == true", .left_value = true, .operator = "==", .right_value = true },
         .{ .input = "true != false", .left_value = true, .operator = "!=", .right_value = false },
         .{ .input = "false == false", .left_value = false, .operator = "==", .right_value = false },
     };
 
-    for (infixBoolTests) |infix_test| {
+    inline for (infixBoolTests) |infix_test| {
         var l = Lexer.init(infix_test.input);
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
@@ -770,7 +718,7 @@ test "Boolean Expression" {
             .expression_statement => |exp_stmt| switch (exp_stmt.expression.?) {
                 .boolean_expression => |boolean| boolean,
                 else => |e| {
-                    std.debug.print("exp not ast.BooleanExpression. got={s}", .{@typeName(@TypeOf(e))});
+                    std.debug.print("exp not ast.BooleanExpression. got={s}\n", .{@typeName(@TypeOf(e))});
                     unreachable;
                 },
             },
@@ -836,7 +784,7 @@ fn checkParserErrors(p: *const Parser) !void {
 
 fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
     if (!std.mem.eql(u8, s.tokenLiteral(), "let")) {
-        std.debug.print("s.tokenLiteral not \"let\". got={s}", .{s.tokenLiteral()});
+        std.debug.print("s.tokenLiteral not \"let\". got={s}\n", .{s.tokenLiteral()});
         return false;
     }
 
@@ -865,19 +813,19 @@ fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
     const integ = switch (il) {
         .integer_literal => |integer| integer,
         else => |exp| {
-            std.debug.print("il not ast.IntegerLiteral. got={s}", .{@typeName(@TypeOf(exp))});
+            std.debug.print("il not ast.IntegerLiteral. got={s}\n", .{@typeName(@TypeOf(exp))});
             return false;
         },
     };
 
     testing.expectEqual(value, integ.value) catch {
-        std.debug.print("integ.value not {d}. got={d}", .{ value, integ.value });
+        std.debug.print("integ.value not {d}. got={d}\n", .{ value, integ.value });
         return false;
     };
     const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return false;
     defer testing.allocator.free(integer_literal);
     testing.expectEqualStrings(integer_literal, integ.tokenLiteral()) catch {
-        std.debug.print("integ.TokenLiteral not {d}. got={d}", .{ integer_literal, integ.tokenLiteral() });
+        std.debug.print("integ.TokenLiteral not {d}. got={d}\n", .{ integer_literal, integ.tokenLiteral() });
         return false;
     };
     return true;
@@ -887,18 +835,18 @@ fn testIdentifier(expression: ast.Expression, value: []const u8) bool {
     const ident = switch (expression) {
         .identifier => |ident| ident,
         else => |exp| {
-            std.debug.print("il not ast.Identifier. got={s}", .{@typeName(@TypeOf(exp))});
+            std.debug.print("il not ast.Identifier. got={s}\n", .{@typeName(@TypeOf(exp))});
             return false;
         },
     };
 
     testing.expectEqualStrings(ident.value, value) catch {
-        std.debug.print("ident.value not {d}. got={d}", .{ value, ident.value });
+        std.debug.print("ident.value not {d}. got={d}\n", .{ value, ident.value });
         return false;
     };
 
     testing.expectEqualStrings(ident.tokenLiteral(), value) catch {
-        std.debug.print("ident.tokenLiteral() not {d}. got={d}", .{ value, ident.value });
+        std.debug.print("ident.tokenLiteral() not {d}. got={d}\n", .{ value, ident.value });
         return false;
     };
 
@@ -907,7 +855,7 @@ fn testIdentifier(expression: ast.Expression, value: []const u8) bool {
 
 fn testLiteralExpression(exp: ast.Expression, expected: anytype) bool {
     const Type = @TypeOf(expected);
-    if (Type == i64) {
+    if (Type == comptime_int) {
         return testIntegerLiteral(exp, expected);
     }
     if (Type == []const u8) {
@@ -916,10 +864,7 @@ fn testLiteralExpression(exp: ast.Expression, expected: anytype) bool {
     if (Type == bool) {
         return testBooleanLiteral(exp, expected);
     }
-    comptime {
-        @compileError("debug");
-    }
-    std.debug.print("type of exp not handled. got={s}", .{@typeName(Type)});
+    std.debug.print("type of exp not handled. got={s}\n", .{@typeName(Type)});
     return false;
 }
 
@@ -927,7 +872,7 @@ fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8,
     const op_exp: ast.InfixExpression = switch (exp) {
         .infix_expression => |infix| infix,
         else => |e| {
-            std.debug.print("exp not ast.InfixExpression. got={s}", .{@typeName(@TypeOf(e))});
+            std.debug.print("exp not ast.InfixExpression. got={s}\n", .{@typeName(@TypeOf(e))});
             return false;
         },
     };
@@ -937,7 +882,7 @@ fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8,
     }
 
     testing.expectEqualStrings(op_exp.operator, operator) catch {
-        std.debug.print("op_exp.operator not {s}. got={s}", .{ operator, op_exp.operator });
+        std.debug.print("op_exp.operator not {s}. got={s}\n", .{ operator, op_exp.operator });
         return false;
     };
 
@@ -952,20 +897,20 @@ fn testBooleanLiteral(exp: ast.Expression, value: bool) bool {
     const bool_exp: ast.Boolean = switch (exp) {
         .boolean_expression => |boolean| boolean,
         else => |e| {
-            std.debug.print("exp not ast.Boolean. got={s}", .{@typeName(@TypeOf(e))});
+            std.debug.print("exp not ast.Boolean. got={s}\n", .{@typeName(@TypeOf(e))});
             return false;
         },
     };
 
     testing.expectEqual(bool_exp.value, value) catch {
-        std.debug.print("bool_exp.value not {}. got={}", .{ value, bool_exp.value });
+        std.debug.print("bool_exp.value not {}. got={}\n", .{ value, bool_exp.value });
         return false;
     };
 
     const actual = std.fmt.allocPrint(testing.allocator, "{any}", .{bool_exp.value}) catch return false;
     defer testing.allocator.free(actual);
     testing.expectEqualStrings(bool_exp.tokenLiteral(), actual) catch {
-        std.debug.print("bool_exp.tokenLiteral() not {}. got={s}", .{ value, bool_exp.tokenLiteral() });
+        std.debug.print("bool_exp.tokenLiteral() not {}. got={s}\n", .{ value, bool_exp.tokenLiteral() });
         return false;
     };
 
