@@ -453,7 +453,7 @@ test "Let Statement" {
     };
 
     for (expecteds, 0..) |expected, i| {
-        try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
+        try testLetStatement(program.statements[i], expected.expected_identifiers);
     }
 }
 
@@ -582,9 +582,7 @@ test "Prefix Expression" {
         };
 
         try testing.expectEqualStrings(prefix_test.operator, exp.operator);
-        if (!testLiteralExpression(exp.right.*, prefix_test.value)) {
-            unreachable;
-        }
+        try testLiteralExpression(exp.right.*, prefix_test.value);
     }
 }
 
@@ -620,14 +618,12 @@ test "Infix Expression" {
             else => @panic("stmts[0] is not ast.ExpressionStatement"),
         };
 
-        if (!testInfixExpression(
+        try testInfixExpression(
             exp_stmt.expression.?,
             infix_test.left_value,
             infix_test.operator,
             infix_test.right_value,
-        )) {
-            unreachable;
-        }
+        );
     }
 }
 
@@ -817,18 +813,14 @@ test "If Expression" {
     };
 
     const abc = [3]u8{ 'a', 'b', 'c' };
-    if (!testInfixExpression(if_exp.condition.*, abc, "<", "y")) {
-        return error.TestExpectedEqual;
-    }
+    try testInfixExpression(if_exp.condition.*, abc, "<", "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
         .expression_statement => |con_stmt| con_stmt,
         else => @panic("if_exp.consequence.statements[0] is not ast.ExpressionStatement"),
     };
-    if (!testIdentifier(consequence.expression.?, "abc")) {
-        return error.TestExpectedEqual;
-    }
+    try testIdentifier(consequence.expression.?, "abc");
     try testing.expectEqual(if_exp.alternative, null);
 }
 
@@ -851,7 +843,7 @@ fn testOutOfMemory(allocator: std.mem.Allocator, input: []const u8, expecteds: [
     try testing.expect(expecteds.len == program.statements.len);
 
     for (expecteds, 0..) |expected, i| {
-        try testing.expect(testLetStatement(program.statements[i], expected.expected_identifiers));
+        try testLetStatement(program.statements[i], expected.expected_identifiers);
     }
 }
 
@@ -885,142 +877,95 @@ fn checkParserErrors(p: *const Parser) !void {
     return error.FoundParserErrors;
 }
 
-fn testLetStatement(s: ast.Statement, expected: []const u8) bool {
-    if (!std.mem.eql(u8, s.tokenLiteral(), "let")) {
-        std.debug.print("s.tokenLiteral not \"let\". got={s}\n", .{s.tokenLiteral()});
-        return false;
-    }
+fn testLetStatement(s: ast.Statement, expected: []const u8) !void {
+    try testing.expectEqualStrings(s.tokenLiteral(), "let");
 
     var let_stmt: ast.LetStatement = switch (s) {
         .let_statement => s.let_statement,
         else => {
             std.debug.print("s is not *ast.LetStatement. got={s}", .{@typeName(@TypeOf(s))});
-            return false;
+            return error.TestExpectedEqual;
         },
     };
 
-    testing.expectEqualStrings(expected, let_stmt.name.value) catch {
-        std.debug.print("let_stmt.name.value not {s}. got={s}", .{ expected, let_stmt.name.value });
-        return false;
-    };
+    try testing.expectEqualStrings(expected, let_stmt.name.value);
 
-    testing.expectEqualStrings(expected, let_stmt.name.tokenLiteral()) catch {
-        std.debug.print("let_stmt.name.tokenLiteral not {s}. got={s}", .{ expected, let_stmt.name.tokenLiteral() });
-        return false;
-    };
-
-    return true;
+    try testing.expectEqualStrings(expected, let_stmt.name.tokenLiteral());
 }
 
-fn testIntegerLiteral(il: ast.Expression, value: i64) bool {
+fn testIntegerLiteral(il: ast.Expression, value: i64) !void {
     const integ = switch (il) {
         .integer_literal => |integer| integer,
         else => |exp| {
             std.debug.print("il not ast.IntegerLiteral. got={s}\n", .{@typeName(@TypeOf(exp))});
-            return false;
+            return error.TestExpectedEqual;
         },
     };
 
-    testing.expectEqual(value, integ.value) catch {
-        std.debug.print("integ.value not {d}. got={d}\n", .{ value, integ.value });
-        return false;
-    };
-    const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return false;
+    try testing.expectEqual(value, integ.value);
+    const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return error.TestExpectedEqual;
     defer testing.allocator.free(integer_literal);
-    testing.expectEqualStrings(integer_literal, integ.tokenLiteral()) catch {
-        std.debug.print("integ.TokenLiteral not {d}. got={d}\n", .{ integer_literal, integ.tokenLiteral() });
-        return false;
-    };
-    return true;
+    try testing.expectEqualStrings(integer_literal, integ.tokenLiteral());
 }
 
-fn testIdentifier(expression: ast.Expression, value: []const u8) bool {
+fn testIdentifier(expression: ast.Expression, value: []const u8) !void {
     const ident = switch (expression) {
         .identifier => |ident| ident,
         else => |exp| {
             std.debug.print("il not ast.Identifier. got={s}\n", .{@typeName(@TypeOf(exp))});
-            return false;
+            return error.TestExpectedEqual;
         },
     };
 
-    testing.expectEqualStrings(ident.value, value) catch {
-        std.debug.print("ident.value not {d}. got={d}\n", .{ value, ident.value });
-        return false;
-    };
+    try testing.expectEqualStrings(ident.value, value);
 
-    testing.expectEqualStrings(ident.tokenLiteral(), value) catch {
-        std.debug.print("ident.tokenLiteral() not {d}. got={d}\n", .{ value, ident.value });
-        return false;
-    };
-
-    return true;
+    try testing.expectEqualStrings(ident.tokenLiteral(), value);
 }
 
-fn testLiteralExpression(exp: ast.Expression, expected: anytype) bool {
+fn testLiteralExpression(exp: ast.Expression, expected: anytype) !void {
     const type_info = @typeInfo(@TypeOf(expected));
-    std.debug.print("{}\n", .{type_info});
-    const result = switch (type_info) {
-        .comptime_int, .int => testIntegerLiteral(exp, expected),
-        .bool => testBooleanLiteral(exp, expected),
+    // std.debug.print("{}\n", .{type_info});
+    switch (type_info) {
+        .comptime_int, .int => try testIntegerLiteral(exp, expected),
+        .bool => try testBooleanLiteral(exp, expected),
         .pointer => |pointer| switch (pointer.size) {
-            .one => testIdentifier(exp, expected),
+            .one => try testIdentifier(exp, expected),
             .slice => unreachable, // TODO figure out if this is a valid use case or not!
-            else => false,
+            else => return error.TestExpectedEqual,
         },
-        .array => testIdentifier(exp, &expected),
-        else => false,
-    };
-    if (!result) {
-        std.debug.print("type of exp not handled. got={s}\n", .{@typeName(@TypeOf(expected))});
+        .array => try testIdentifier(exp, &expected),
+        else => return error.TestExpectedEqual,
     }
-    return result;
 }
 
-fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8, right: anytype) bool {
+fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8, right: anytype) !void {
     const op_exp: ast.InfixExpression = switch (exp) {
         .infix_expression => |infix| infix,
         else => |e| {
             std.debug.print("exp not ast.InfixExpression. got={s}\n", .{@typeName(@TypeOf(e))});
-            return false;
+            return error.TestExpectedEqual;
         },
     };
 
-    if (!testLiteralExpression(op_exp.left.*, left)) {
-        return false;
-    }
+    try testLiteralExpression(op_exp.left.*, left);
 
-    testing.expectEqualStrings(op_exp.operator, operator) catch {
-        std.debug.print("op_exp.operator not {s}. got={s}\n", .{ operator, op_exp.operator });
-        return false;
-    };
+    try testing.expectEqualStrings(op_exp.operator, operator);
 
-    if (!testLiteralExpression(op_exp.right.*, right)) {
-        return false;
-    }
-
-    return true;
+    try testLiteralExpression(op_exp.right.*, right);
 }
 
-fn testBooleanLiteral(exp: ast.Expression, value: bool) bool {
+fn testBooleanLiteral(exp: ast.Expression, value: bool) !void {
     const bool_exp: ast.Boolean = switch (exp) {
         .boolean_expression => |boolean| boolean,
         else => |e| {
             std.debug.print("exp not ast.Boolean. got={s}\n", .{@typeName(@TypeOf(e))});
-            return false;
+            return error.TestExpectedEqual;
         },
     };
 
-    testing.expectEqual(bool_exp.value, value) catch {
-        std.debug.print("bool_exp.value not {}. got={}\n", .{ value, bool_exp.value });
-        return false;
-    };
+    try testing.expectEqual(bool_exp.value, value);
 
-    const actual = std.fmt.allocPrint(testing.allocator, "{any}", .{bool_exp.value}) catch return false;
+    const actual = try std.fmt.allocPrint(testing.allocator, "{any}", .{bool_exp.value});
     defer testing.allocator.free(actual);
-    testing.expectEqualStrings(bool_exp.tokenLiteral(), actual) catch {
-        std.debug.print("bool_exp.tokenLiteral() not {}. got={s}\n", .{ value, bool_exp.tokenLiteral() });
-        return false;
-    };
-
-    return true;
+    try testing.expectEqualStrings(bool_exp.tokenLiteral(), actual);
 }
