@@ -57,42 +57,29 @@ pub const Statement = union(enum) {
     let_statement: LetStatement,
     return_statement: ReturnStatement,
     expression_statement: ExpressionStatement,
-
-    pub fn deinit(self: Statement, allocator: std.mem.Allocator) void {
-        switch (self) {
-            .let_statement => {
-                allocator.destroy(self.let_statement.name);
-            },
-            .return_statement => {},
-            .expression_statement => |exp_stmt| {
-                if (exp_stmt.expression) |exp| {
-                    exp.deinit(allocator);
-                }
-            },
-        }
-    }
+    block_statement: BlockStatement,
 
     pub fn tokenLiteral(self: *const Statement) []const u8 {
         return switch (self.*) {
-            .let_statement => self.let_statement.tokenLiteral(),
-            .return_statement => self.return_statement.tokenLiteral(),
-            .expression_statement => self.expression_statement.tokenLiteral(),
+            inline else => |stmt| stmt.tokenLiteral(),
         };
     }
 
     pub fn statementNode(self: *const Statement) void {
         switch (self.*) {
-            .let_statement => self.let_statement.statementNode(),
-            .return_statement => self.return_statement.statementNode(),
-            .expression_statement => self.expression_statement.statementNode(),
+            inline else => |stmt| stmt.statementNode(),
         }
     }
 
     pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) StringError!void {
         switch (self.*) {
-            .let_statement => try self.let_statement.string(writer),
-            .return_statement => try self.return_statement.string(writer),
-            .expression_statement => try self.expression_statement.string(writer),
+            inline else => |stmt| try stmt.string(writer),
+        }
+    }
+
+    pub fn deinit(self: Statement, allocator: std.mem.Allocator) void {
+        switch (self) {
+            inline else => |stmt| stmt.deinit(allocator),
         }
     }
 };
@@ -121,6 +108,10 @@ pub const LetStatement = struct {
             try writer.writeAll("null");
         }
     }
+
+    pub fn deinit(self: *const LetStatement, allocator: std.mem.Allocator) void {
+        allocator.destroy(self.name);
+    }
 };
 
 pub const ReturnStatement = struct {
@@ -143,6 +134,8 @@ pub const ReturnStatement = struct {
             try writer.writeAll("null");
         }
     }
+
+    pub fn deinit(_: *const ReturnStatement, _: std.mem.Allocator) void {}
 };
 
 pub const ExpressionStatement = struct {
@@ -162,6 +155,33 @@ pub const ExpressionStatement = struct {
             try writer.writeAll("null");
         }
     }
+
+    pub fn deinit(self: *const ExpressionStatement, allocator: std.mem.Allocator) void {
+        if (self.expression) |exp| {
+            exp.deinit(allocator);
+        }
+    }
+};
+
+pub const BlockStatement = struct {
+    _token: token.Token,
+    statements: []Statement,
+
+    pub fn tokenLiteral(self: *const BlockStatement) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn statementNode(_: *const BlockStatement) void {}
+
+    pub fn string(self: *const BlockStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
+        for (self.statements) |stmt| {
+            try stmt.string(writer);
+        }
+    }
+
+    pub fn deinit(self: *const BlockStatement, allocator: std.mem.Allocator) void {
+        allocator.free(self.statements);
+    }
 };
 
 pub const Expression = union(enum) {
@@ -170,50 +190,29 @@ pub const Expression = union(enum) {
     prefix_expression: PrefixExpression,
     infix_expression: InfixExpression,
     boolean_expression: Boolean,
+    if_expression: IfExpression,
 
     pub fn tokenLiteral(self: *const Expression) []const u8 {
         return switch (self.*) {
-            .identifier => |ident| ident.tokenLiteral(),
-            .integer_literal => |int| int.tokenLiteral(),
-            .prefix_expression => |prefix| prefix.tokenLiteral(),
-            .infix_expression => |infix| infix.tokenLiteral(),
-            .boolean_expression => |boolean| boolean.tokenLiteral(),
+            inline else => |exp| exp.tokenLiteral(),
         };
     }
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
-            .identifier => |ident| ident.expressionNode(),
-            .integer_literal => |int| int.expressionNode(),
-            .prefix_expression => |prefix| prefix.expressionNode(),
-            .infix_expression => |infix| infix.expressionNode(),
-            .boolean_expression => |boolean| boolean.expressionNode(),
+            inline else => |exp| try exp.expressionNode(),
         }
     }
 
     pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) StringError!void {
         switch (self.*) {
-            .identifier => |ident| try ident.string(writer),
-            .integer_literal => |int| try int.string(writer),
-            .prefix_expression => |prefix| try prefix.string(writer),
-            .infix_expression => |infix| try infix.string(writer),
-            .boolean_expression => |boolean| try boolean.string(writer),
+            inline else => |exp| try exp.string(writer),
         }
     }
 
     pub fn deinit(self: Expression, allocator: std.mem.Allocator) void {
         switch (self) {
-            .identifier, .integer_literal, .boolean_expression => {},
-            .prefix_expression => |prefix| {
-                prefix.right.deinit(allocator);
-                allocator.destroy(prefix.right);
-            },
-            .infix_expression => |infix| {
-                infix.right.deinit(allocator);
-                allocator.destroy(infix.right);
-                infix.left.deinit(allocator);
-                allocator.destroy(infix.left);
-            },
+            inline else => |exp| exp.deinit(allocator),
         }
     }
 };
@@ -231,6 +230,8 @@ pub const Identifier = struct {
     pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self.value);
     }
+
+    pub fn deinit(_: *const Identifier, _: std.mem.Allocator) void {}
 };
 
 pub const IntegerLiteral = struct {
@@ -246,6 +247,8 @@ pub const IntegerLiteral = struct {
     pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self._token.literal);
     }
+
+    pub fn deinit(_: *const IntegerLiteral, _: std.mem.Allocator) void {}
 };
 
 pub const PrefixExpression = struct {
@@ -264,6 +267,11 @@ pub const PrefixExpression = struct {
         try writer.writeAll(self.operator);
         try self.right.string(writer);
         try writer.writeByte(')');
+    }
+
+    pub fn deinit(self: *const PrefixExpression, allocator: std.mem.Allocator) void {
+        self.right.deinit(allocator);
+        allocator.destroy(self.right);
     }
 };
 
@@ -288,6 +296,13 @@ pub const InfixExpression = struct {
         try self.right.string(writer);
         try writer.writeByte(')');
     }
+
+    pub fn deinit(self: *const InfixExpression, allocator: std.mem.Allocator) void {
+        self.right.deinit(allocator);
+        allocator.destroy(self.right);
+        self.left.deinit(allocator);
+        allocator.destroy(self.left);
+    }
 };
 
 pub const Boolean = struct {
@@ -302,6 +317,39 @@ pub const Boolean = struct {
 
     pub fn string(self: *const Boolean, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self._token.literal);
+    }
+
+    pub fn deinit(_: *const Boolean, _: std.mem.Allocator) void {}
+};
+
+pub const IfExpression = struct {
+    _token: token.Token,
+    condition: *Expression,
+    consequence: *BlockStatement,
+    alternative: ?*BlockStatement,
+
+    pub fn tokenLiteral(self: *const IfExpression) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn expressionNode(_: *const IfExpression) void {}
+
+    pub fn string(self: *const IfExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
+        try writer.writeAll("if");
+        try self.condition.string(writer);
+        try writer.writeByte(' ');
+        try self.consequence.string(writer);
+        if (self.alternative) |alt| {
+            try writer.writeAll("else ");
+            try alt.string(writer);
+        }
+    }
+
+    pub fn deinit(self: *const IfExpression, allocator: std.mem.Allocator) void {
+        self.consequence.deinit(allocator);
+        allocator.destroy(self.consequence);
+        self.condition.deinit(allocator);
+        allocator.destroy(self.condition);
     }
 };
 
