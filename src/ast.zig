@@ -346,6 +346,10 @@ pub const IfExpression = struct {
     }
 
     pub fn deinit(self: *const IfExpression, allocator: std.mem.Allocator) void {
+        if (self.alternative) |alt| {
+            alt.deinit(allocator);
+            allocator.destroy(alt);
+        }
         self.consequence.deinit(allocator);
         allocator.destroy(self.consequence);
         self.condition.deinit(allocator);

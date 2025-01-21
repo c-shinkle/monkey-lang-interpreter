@@ -343,12 +343,24 @@ const Parser = struct {
         errdefer self.allocator.destroy(consequence);
         consequence.* = try self.parseBlockStatement();
 
+        var maybe_alt: ?*ast.BlockStatement = null;
+        if (self.peekTokenIs(token.ELSE)) {
+            self.nextToken();
+
+            if (!self.expectPeek(token.LBRACE)) {
+                return ExpressionError.MissingLeftBraceError;
+            }
+            maybe_alt = try self.allocator.create(ast.BlockStatement);
+            errdefer self.allocator.destroy(maybe_alt.?);
+            maybe_alt.?.* = try self.parseBlockStatement();
+        }
+
         return ast.Expression{
             .if_expression = ast.IfExpression{
                 ._token = _token,
                 .condition = condition,
                 .consequence = consequence,
-                .alternative = null,
+                .alternative = maybe_alt,
             },
         };
     }
@@ -822,6 +834,49 @@ test "If Expression" {
     };
     try testIdentifier(consequence.expression.?, "abc");
     try testing.expectEqual(if_exp.alternative, null);
+}
+
+test "If Else Expression" {
+    const input = "if (x < y) { x } else { y }";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit();
+    const program = try parser.parseProgram();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+
+    const exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+    };
+
+    const if_exp = switch (exp_stmt.expression.?) {
+        .if_expression => |if_exp| if_exp,
+        else => |other| {
+            const fmt = "Expect IfExpression, got {s}";
+            const type_name = @typeName(@TypeOf(other));
+            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+        },
+    };
+
+    try testInfixExpression(if_exp.condition.*, "x", "<", "y");
+
+    try testing.expectEqual(1, if_exp.consequence.statements.len);
+    const consequence = switch (if_exp.consequence.statements[0]) {
+        .expression_statement => |con_stmt| con_stmt,
+        else => @panic("if_exp.consequence.statements[0] is not ast.ExpressionStatement"),
+    };
+    try testIdentifier(consequence.expression.?, "x");
+
+    const alternative = if (if_exp.alternative) |alt| alt else return error.TestExpectedEqual;
+    try testing.expectEqual(1, alternative.statements.len);
+    const alt_stmt = switch (alternative.statements[0]) {
+        .expression_statement => |alt_stmt| alt_stmt,
+        else => @panic("if_exp.alternative.statements[0] is not ast.ExpressionStatement"),
+    };
+    try testIdentifier(alt_stmt.expression.?, "y");
 }
 
 //Test Helpers
