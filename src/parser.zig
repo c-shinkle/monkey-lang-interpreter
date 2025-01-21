@@ -1,11 +1,14 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ast = @import("./ast.zig");
-const Lexer = @import("./lexer.zig").Lexer;
-const token = @import("./token.zig");
+const ast = @import("ast.zig");
+const Lexer = @import("lexer.zig").Lexer;
+const token = @import("token.zig");
 
-const ExpressionError = error{UnknownPrefixToken} || std.fmt.ParseIntError || std.mem.Allocator.Error;
+const ExpressionError = error{
+    UnknownPrefixToken,
+    MissingRightParenthesisError,
+} || std.fmt.ParseIntError || std.mem.Allocator.Error;
 
 const LetStatementError = error{ MissingLetIdentifier, MissingLetAssign } || std.mem.Allocator.Error;
 
@@ -66,6 +69,7 @@ const Parser = struct {
         try p.prefix_parse_fns.put(token.MINUS, parsePrefixExpression);
         try p.prefix_parse_fns.put(token.TRUE, parseBoolean);
         try p.prefix_parse_fns.put(token.FALSE, parseBoolean);
+        try p.prefix_parse_fns.put(token.LPAREN, parseGroupedExpression);
 
         try p.infix_parse_fns.put(token.PLUS, parseInfixExpression);
         try p.infix_parse_fns.put(token.MINUS, parseInfixExpression);
@@ -120,6 +124,7 @@ const Parser = struct {
                 try list.append(stmt);
             } else |err| switch (err) {
                 StatementError.UnknownPrefixToken,
+                StatementError.MissingRightParenthesisError,
                 StatementError.MissingLetIdentifier,
                 StatementError.MissingLetAssign,
                 => {},
@@ -289,6 +294,18 @@ const Parser = struct {
             ._token = self.cur_token,
             .value = self.curTokenIs(token.TRUE),
         } };
+    }
+
+    fn parseGroupedExpression(self: *Parser) ExpressionError!ast.Expression {
+        self.nextToken();
+
+        const exp = self.parseExpression(Precedence.LOWEST);
+
+        if (!self.expectPeek(token.RPAREN)) {
+            return ExpressionError.MissingRightParenthesisError;
+        }
+
+        return exp;
     }
 
     // Helper Methods
@@ -638,30 +655,30 @@ test "Operator Precedence" {
         //     .input = "3 < 5 == true",
         //     .expected = "((3 < 5) == true)",
         // },
-        // .{
-        //     .input = "1 + (2 + 3) + 4",
-        //     .expected = "((1 + (2 + 3)) + 4)",
-        // },
-        // .{
-        //     .input = "(5 + 5) * 2",
-        //     .expected = "((5 + 5) * 2)",
-        // },
-        // .{
-        //     .input = "2 / (5 + 5)",
-        //     .expected = "(2 / (5 + 5))",
-        // },
-        // .{
-        //     .input = "(5 + 5) * 2 * (5 + 5)",
-        //     .expected = "(((5 + 5) * 2) * (5 + 5))",
-        // },
-        // .{
-        //     .input = "-(5 + 5)",
-        //     .expected = "(-(5 + 5))",
-        // },
-        // .{
-        //     .input = "!(true == true)",
-        //     .expected = "(!(true == true))",
-        // },
+        .{
+            .input = "1 + (2 + 3) + 4",
+            .expected = "((1 + (2 + 3)) + 4)",
+        },
+        .{
+            .input = "(5 + 5) * 2",
+            .expected = "((5 + 5) * 2)",
+        },
+        .{
+            .input = "2 / (5 + 5)",
+            .expected = "(2 / (5 + 5))",
+        },
+        .{
+            .input = "(5 + 5) * 2 * (5 + 5)",
+            .expected = "(((5 + 5) * 2) * (5 + 5))",
+        },
+        .{
+            .input = "-(5 + 5)",
+            .expected = "(-(5 + 5))",
+        },
+        .{
+            .input = "!(true == true)",
+            .expected = "(!(true == true))",
+        },
         // .{
         //     .input = "a + add(b * c) + d",
         //     .expected = "((a + add((b * c))) + d)",
