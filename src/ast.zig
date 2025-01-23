@@ -180,6 +180,9 @@ pub const BlockStatement = struct {
     }
 
     pub fn deinit(self: *const BlockStatement, allocator: std.mem.Allocator) void {
+        for (self.statements) |stmt| {
+            stmt.deinit(allocator);
+        }
         allocator.free(self.statements);
     }
 };
@@ -191,17 +194,18 @@ pub const Expression = union(enum) {
     infix_expression: InfixExpression,
     boolean_expression: Boolean,
     if_expression: IfExpression,
-
-    pub fn tokenLiteral(self: *const Expression) []const u8 {
-        return switch (self.*) {
-            inline else => |exp| exp.tokenLiteral(),
-        };
-    }
+    function_literal: FunctionLiteral,
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
             inline else => |exp| try exp.expressionNode(),
         }
+    }
+
+    pub fn tokenLiteral(self: *const Expression) []const u8 {
+        return switch (self.*) {
+            inline else => |exp| exp.tokenLiteral(),
+        };
     }
 
     pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) StringError!void {
@@ -221,11 +225,11 @@ pub const Identifier = struct {
     _token: token.Token,
     value: []const u8,
 
+    pub fn expressionNode(_: *const Identifier) void {}
+
     pub fn tokenLiteral(self: *const Identifier) []const u8 {
         return self._token.literal;
     }
-
-    pub fn expressionNode(_: *const Identifier) void {}
 
     pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self.value);
@@ -238,11 +242,11 @@ pub const IntegerLiteral = struct {
     _token: token.Token,
     value: i64,
 
+    pub fn expressionNode(_: *const IntegerLiteral) void {}
+
     pub fn tokenLiteral(self: *const IntegerLiteral) []const u8 {
         return self._token.literal;
     }
-
-    pub fn expressionNode(_: *const IntegerLiteral) void {}
 
     pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self._token.literal);
@@ -256,11 +260,11 @@ pub const PrefixExpression = struct {
     operator: []const u8,
     right: *Expression,
 
+    pub fn expressionNode(_: *const PrefixExpression) void {}
+
     pub fn tokenLiteral(self: *const PrefixExpression) []const u8 {
         return self._token.literal;
     }
-
-    pub fn expressionNode(_: *const PrefixExpression) void {}
 
     pub fn string(self: *const PrefixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeByte('(');
@@ -281,11 +285,11 @@ pub const InfixExpression = struct {
     operator: []const u8,
     right: *Expression,
 
+    pub fn expressionNode(_: *const InfixExpression) void {}
+
     pub fn tokenLiteral(self: *const InfixExpression) []const u8 {
         return self._token.literal;
     }
-
-    pub fn expressionNode(_: *const InfixExpression) void {}
 
     pub fn string(self: *const InfixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeByte('(');
@@ -309,11 +313,11 @@ pub const Boolean = struct {
     _token: token.Token,
     value: bool,
 
+    pub fn expressionNode(_: *const Boolean) void {}
+
     pub fn tokenLiteral(self: *const Boolean) []const u8 {
         return self._token.literal;
     }
-
-    pub fn expressionNode(_: *const Boolean) void {}
 
     pub fn string(self: *const Boolean, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll(self._token.literal);
@@ -328,11 +332,11 @@ pub const IfExpression = struct {
     consequence: *BlockStatement,
     alternative: ?*BlockStatement,
 
+    pub fn expressionNode(_: *const IfExpression) void {}
+
     pub fn tokenLiteral(self: *const IfExpression) []const u8 {
         return self._token.literal;
     }
-
-    pub fn expressionNode(_: *const IfExpression) void {}
 
     pub fn string(self: *const IfExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
         try writer.writeAll("if");
@@ -354,6 +358,44 @@ pub const IfExpression = struct {
         allocator.destroy(self.consequence);
         self.condition.deinit(allocator);
         allocator.destroy(self.condition);
+    }
+};
+
+pub const FunctionLiteral = struct {
+    _token: token.Token,
+    parameters: []const *Identifier,
+    body: *BlockStatement,
+
+    pub fn expressionNode(_: *const FunctionLiteral) void {}
+
+    pub fn tokenLiteral(self: *const FunctionLiteral) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn string(
+        self: *const FunctionLiteral,
+        writer: *std.ArrayList(u8).Writer,
+    ) StringError!void {
+        try writer.writeAll(self.tokenLiteral());
+        if (self.parameters.len > 0) {
+            try self.parameters[0].string(writer);
+            for (self.parameters[1..]) |param| {
+                try writer.writeAll(", ");
+                try param.string(writer);
+            }
+        }
+        try writer.writeAll(") ");
+        try self.body.string(writer);
+    }
+
+    pub fn deinit(self: *const FunctionLiteral, allocator: std.mem.Allocator) void {
+        self.body.deinit(allocator);
+        allocator.destroy(self.body);
+
+        for (self.parameters) |param| {
+            allocator.destroy(param);
+        }
+        allocator.free(self.parameters);
     }
 };
 

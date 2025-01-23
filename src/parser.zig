@@ -7,9 +7,10 @@ const token = @import("token.zig");
 
 const ExpressionError = error{
     UnknownPrefixToken,
-    MissingRightParenthesisError,
     MissingLeftParenthesisError,
+    MissingRightParenthesisError,
     MissingLeftBraceError,
+    MissingRightBraceError,
 } || std.fmt.ParseIntError || std.mem.Allocator.Error;
 
 const LetStatementError = error{ MissingLetIdentifier, MissingLetAssign } || std.mem.Allocator.Error;
@@ -73,6 +74,7 @@ const Parser = struct {
         try p.prefix_parse_fns.put(token.FALSE, parseBoolean);
         try p.prefix_parse_fns.put(token.LPAREN, parseGroupedExpression);
         try p.prefix_parse_fns.put(token.IF, parseIfExpression);
+        try p.prefix_parse_fns.put(token.FUNCTION, parseFunctionLiteral);
 
         try p.infix_parse_fns.put(token.PLUS, parseInfixExpression);
         try p.infix_parse_fns.put(token.MINUS, parseInfixExpression);
@@ -123,11 +125,12 @@ const Parser = struct {
                 try list.append(stmt);
             } else |err| switch (err) {
                 StatementError.UnknownPrefixToken,
-                StatementError.MissingRightParenthesisError,
                 StatementError.MissingLetIdentifier,
                 StatementError.MissingLetAssign,
                 StatementError.MissingLeftParenthesisError,
+                StatementError.MissingRightParenthesisError,
                 StatementError.MissingLeftBraceError,
+                StatementError.MissingRightBraceError,
                 => {},
                 StatementError.InvalidCharacter, StatementError.Overflow => {
                     const fmt = "could not parse {s} as integer";
@@ -363,6 +366,66 @@ const Parser = struct {
                 .alternative = maybe_alt,
             },
         };
+    }
+
+    fn parseFunctionLiteral(self: *Parser) StatementError!ast.Expression {
+        const _token = self.cur_token;
+        if (!self.expectPeek(token.LPAREN)) {
+            return ExpressionError.MissingLeftParenthesisError;
+        }
+        const parameters = try self.parseFunctionParameters();
+        if (!self.expectPeek(token.LBRACE)) {
+            return error.MissingLeftBraceError;
+        }
+        const body = try self.allocator.create(ast.BlockStatement);
+        errdefer self.allocator.destroy(body);
+        body.* = try self.parseBlockStatement();
+
+        return ast.Expression{
+            .function_literal = ast.FunctionLiteral{
+                ._token = _token,
+                .parameters = parameters,
+                .body = body,
+            },
+        };
+    }
+
+    fn parseFunctionParameters(self: *Parser) StatementError![]const *ast.Identifier {
+        var identifiers = std.ArrayList(*ast.Identifier).init(self.allocator);
+
+        if (self.peekTokenIs(token.RPAREN)) {
+            self.nextToken();
+            return try identifiers.toOwnedSlice();
+        }
+
+        self.nextToken();
+
+        const first_temp = try self.allocator.create(ast.Identifier);
+        errdefer self.allocator.destroy(first_temp);
+        first_temp.* = ast.Identifier{
+            ._token = self.cur_token,
+            .value = self.cur_token.literal,
+        };
+
+        try identifiers.append(first_temp);
+
+        while (self.peekTokenIs(token.COMMA)) {
+            self.nextToken();
+            self.nextToken();
+            const loop_temp = try self.allocator.create(ast.Identifier);
+            errdefer self.allocator.destroy(loop_temp);
+            loop_temp.* = ast.Identifier{
+                ._token = self.cur_token,
+                .value = self.cur_token.literal,
+            };
+            try identifiers.append(loop_temp);
+        }
+
+        if (!self.expectPeek(token.RPAREN)) {
+            return ExpressionError.MissingRightParenthesisError;
+        }
+
+        return try identifiers.toOwnedSlice();
     }
 
     // Helper Methods
@@ -879,6 +942,91 @@ test "If Else Expression" {
     try testIdentifier(alt_stmt.expression.?, "y");
 }
 
+test "Function Literal Expression" {
+    const input = "fn(x, y) { x + y }";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit();
+    const program = try parser.parseProgram();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+
+    const fn_lit_exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+    };
+
+    const fn_lit = switch (fn_lit_exp_stmt.expression.?) {
+        .function_literal => |fn_lit| fn_lit,
+        else => |other| {
+            const fmt = "Expect FunctionLiteral, got {s}";
+            const type_name = @typeName(@TypeOf(other));
+            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+        },
+    };
+
+    try testing.expectEqual(2, fn_lit.parameters.len);
+
+    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[0].* }, "x");
+    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[1].* }, "y");
+
+    try testing.expectEqual(1, fn_lit.body.statements.len);
+
+    const body_exp_stmt: ast.ExpressionStatement = switch (fn_lit.body.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+    };
+    try testInfixExpression(body_exp_stmt.expression.?, "x", "+", "y");
+}
+
+test "Function Parameter Parsing" {
+    const param_tests = [_]struct {
+        input: []const u8,
+        expected_params: []const []const u8,
+    }{
+        .{
+            .input = "fn() {};",
+            .expected_params = &[_][]const u8{},
+        },
+        .{
+            .input = "fn(x) {};",
+            .expected_params = &[_][]const u8{"x"},
+        },
+        .{
+            .input = "fn(x, y, z) {};",
+            .expected_params = &[_][]const u8{ "x", "y", "z" },
+        },
+    };
+    for (param_tests) |param_test| {
+        var lexer = Lexer.init(param_test.input);
+        var parser = try Parser.init(&lexer, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        const stmt = switch (program.statements[0]) {
+            .expression_statement => |stmt| stmt,
+            else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        };
+        const function = switch (stmt.expression.?) {
+            .function_literal => |function| function,
+            else => |other| {
+                const fmt = "Expect FunctionLiteral, got {s}";
+                const type_name = @typeName(@TypeOf(other));
+                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+            },
+        };
+        try testing.expectEqual(param_test.expected_params.len, function.parameters.len);
+        for (param_test.expected_params, 0..) |param, i| {
+            const exp = ast.Expression{ .identifier = function.parameters[i].* };
+            try testLiteralExpression(exp, param);
+        }
+    }
+}
+
 //Test Helpers
 
 const Expected = struct {
@@ -985,7 +1133,7 @@ fn testLiteralExpression(exp: ast.Expression, expected: anytype) !void {
         .bool => try testBooleanLiteral(exp, expected),
         .pointer => |pointer| switch (pointer.size) {
             .one => try testIdentifier(exp, expected),
-            .slice => unreachable, // TODO figure out if this is a valid use case or not!
+            .slice => try testIdentifier(exp, expected),
             else => return error.TestExpectedEqual,
         },
         .array => try testIdentifier(exp, &expected),
