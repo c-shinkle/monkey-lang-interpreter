@@ -1,7 +1,7 @@
 const std = @import("std");
-const token = @import("./token.zig");
-
 const testing = std.testing;
+
+const token = @import("./token.zig");
 
 pub const Lexer = struct {
     input: []const u8,
