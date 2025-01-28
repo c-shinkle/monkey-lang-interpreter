@@ -195,6 +195,7 @@ pub const Expression = union(enum) {
     boolean_expression: Boolean,
     if_expression: IfExpression,
     function_literal: FunctionLiteral,
+    call_expression: CallExpression,
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
@@ -396,6 +397,45 @@ pub const FunctionLiteral = struct {
             allocator.destroy(param);
         }
         allocator.free(self.parameters);
+    }
+};
+
+pub const CallExpression = struct {
+    _token: token.Token,
+    function: *Expression,
+    arguments: []const *Expression,
+
+    pub fn expressionNode(_: *const CallExpression) void {}
+
+    pub fn tokenLiteral(self: *const CallExpression) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn string(
+        self: *const CallExpression,
+        writer: *std.ArrayList(u8).Writer,
+    ) StringError!void {
+        try self.function.string(writer);
+        try writer.writeByte('(');
+        if (self.arguments.len > 0) {
+            try self.arguments[0].string(writer);
+            for (self.arguments[1..]) |arg| {
+                try writer.writeAll(", ");
+                try arg.string(writer);
+            }
+        }
+        try writer.writeByte(')');
+    }
+
+    pub fn deinit(self: *const CallExpression, allocator: std.mem.Allocator) void {
+        for (self.arguments) |arg| {
+            arg.deinit(allocator);
+            allocator.destroy(arg);
+        }
+
+        allocator.free(self.arguments);
+
+        allocator.destroy(self.function);
     }
 };
 

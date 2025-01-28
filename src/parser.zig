@@ -37,6 +37,7 @@ const precedences = std.StaticStringMap(Precedence).initComptime(.{
     .{ token.MINUS, Precedence.SUM },
     .{ token.SLASH, Precedence.PRODUCT },
     .{ token.ASTERISK, Precedence.PRODUCT },
+    .{ token.LPAREN, Precedence.CALL },
 });
 
 const Parser = struct {
@@ -80,6 +81,7 @@ const Parser = struct {
         try p.infix_parse_fns.put(token.NOT_EQ, parseInfixExpression);
         try p.infix_parse_fns.put(token.LT, parseInfixExpression);
         try p.infix_parse_fns.put(token.GT, parseInfixExpression);
+        try p.infix_parse_fns.put(token.LPAREN, parseCallExpression);
 
         p.nextToken();
         p.nextToken();
@@ -421,6 +423,53 @@ const Parser = struct {
         }
 
         return try identifiers.toOwnedSlice();
+    }
+
+    fn parseCallExpression(self: *Parser, lhs: ast.Expression) ExpressionError!ast.Expression {
+        const function = try self.allocator.create(ast.Expression);
+        errdefer self.allocator.destroy(function);
+        function.* = lhs;
+        const _token = self.cur_token;
+
+        const arguments = try self.parseCallArguments();
+        return ast.Expression{
+            .call_expression = ast.CallExpression{
+                ._token = _token,
+                .function = function,
+                .arguments = arguments,
+            },
+        };
+    }
+
+    fn parseCallArguments(self: *Parser) ExpressionError![]const *ast.Expression {
+        var args = std.ArrayList(*ast.Expression).init(self.allocator);
+
+        if (self.peekTokenIs(token.RPAREN)) {
+            self.nextToken();
+            return try args.toOwnedSlice();
+        }
+
+        self.nextToken();
+
+        const first_temp = try self.allocator.create(ast.Expression);
+        errdefer self.allocator.destroy(first_temp);
+        first_temp.* = try self.parseExpression(Precedence.LOWEST);
+        try args.append(first_temp);
+
+        while (self.peekTokenIs(token.COMMA)) {
+            self.nextToken();
+            self.nextToken();
+            const loop_temp = try self.allocator.create(ast.Expression);
+            errdefer self.allocator.destroy(loop_temp);
+            loop_temp.* = try self.parseExpression(Precedence.LOWEST);
+            try args.append(loop_temp);
+        }
+
+        if (!self.expectPeek(token.RPAREN)) {
+            return ExpressionError.MissingRightParenthesis;
+        }
+
+        return try args.toOwnedSlice();
     }
 
     // Helper Methods
@@ -790,18 +839,18 @@ test "Operator Precedence" {
             .input = "!(true == true)",
             .expected = "(!(true == true))",
         },
-        // .{
-        //     .input = "a + add(b * c) + d",
-        //     .expected = "((a + add((b * c))) + d)",
-        // },
-        // .{
-        //     .input = "add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))",
-        //     .expected = "add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))",
-        // },
-        // .{
-        //     .input = "add(a + b + c * d / f + g)",
-        //     .expected = "add((((a + b) + ((c * d) / f)) + g))",
-        // },
+        .{
+            .input = "a + add(b * c) + d",
+            .expected = "((a + add((b * c))) + d)",
+        },
+        .{
+            .input = "add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))",
+            .expected = "add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))",
+        },
+        .{
+            .input = "add(a + b + c * d / f + g)",
+            .expected = "add((((a + b) + ((c * d) / f)) + g))",
+        },
     };
 
     var array_list = std.ArrayList(u8).init(testing.allocator);
@@ -1020,6 +1069,43 @@ test "Function Parameter Parsing" {
             try testLiteralExpression(exp, param);
         }
     }
+}
+
+test "Call Expression Parsing" {
+    const input = "add(1, 2 * 3, 4 + 5);";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit();
+    const program = try parser.parseProgram();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    const stmts = program.statements;
+    try testing.expectEqual(1, stmts.len);
+
+    const exp_stmt = switch (stmts[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => |other| {
+            const fmt = "Expect ExpressionStatement, got {s}";
+            const type_name = @typeName(@TypeOf(other));
+            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+        },
+    };
+    const call_exp = switch (exp_stmt.expression.?) {
+        .call_expression => |call_exp| call_exp,
+        else => |other| {
+            const fmt = "Expect CallExpression, got {s}";
+            const type_name = @typeName(@TypeOf(other));
+            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+        },
+    };
+    try testIdentifier(call_exp.function.*, "add");
+
+    const args = call_exp.arguments;
+    try testing.expectEqual(3, args.len);
+    try testLiteralExpression(args[0].*, 1);
+    try testInfixExpression(args[1].*, 2, "*", 3);
+    try testInfixExpression(args[2].*, 4, "+", 5);
 }
 
 //Test Helpers
