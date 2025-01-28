@@ -155,7 +155,7 @@ const Parser = struct {
             const let_statement = try self.parseLetStatement();
             return ast.Statement{ .let_statement = let_statement };
         } else if (std.mem.eql(u8, token.RETURN, self.cur_token._type)) {
-            const return_statement = self.parseReturnStatement();
+            const return_statement = try self.parseReturnStatement();
             return ast.Statement{ .return_statement = return_statement };
         } else {
             const expression_statement = try self.parseExpressionStatement();
@@ -163,7 +163,7 @@ const Parser = struct {
         }
     }
 
-    fn parseLetStatement(self: *Parser) StatementError!ast.LetStatement {
+    fn parseLetStatement(self: *Parser) ExpressionError!ast.LetStatement {
         const let_token = self.cur_token;
 
         if (!self.expectPeek(token.IDENT)) {
@@ -183,25 +183,29 @@ const Parser = struct {
             return StatementError.MissingLetAssign;
         }
 
-        // TODO
+        self.nextToken();
 
-        while (!self.curTokenIs(token.SEMICOLON)) {
+        const value = try self.parseExpression(Precedence.LOWEST);
+
+        if (self.peekTokenIs(token.SEMICOLON)) {
             self.nextToken();
         }
 
-        return ast.LetStatement{ ._token = let_token, .name = name, .value = null };
+        return ast.LetStatement{ ._token = let_token, .name = name, .value = value };
     }
 
-    pub fn parseReturnStatement(self: *Parser) ast.ReturnStatement {
-        const return_token = self.cur_token;
+    pub fn parseReturnStatement(self: *Parser) ExpressionError!ast.ReturnStatement {
+        const _token = self.cur_token;
 
         self.nextToken();
 
-        while (!self.curTokenIs(token.SEMICOLON)) {
+        const return_value = try self.parseExpression(Precedence.LOWEST);
+
+        if (self.peekTokenIs(token.SEMICOLON)) {
             self.nextToken();
         }
 
-        return ast.ReturnStatement{ ._token = return_token, .return_value = null };
+        return ast.ReturnStatement{ ._token = _token, .return_value = return_value };
     }
 
     pub fn parseExpressionStatement(self: *Parser) ExpressionError!ast.ExpressionStatement {
@@ -443,6 +447,13 @@ const Parser = struct {
 
     fn parseCallArguments(self: *Parser) ExpressionError![]const *ast.Expression {
         var args = std.ArrayList(*ast.Expression).init(self.allocator);
+        // errdefer {
+        //     for (args.items) |arg| {
+        //         arg.deinit(self.allocator);
+        //         self.allocator.destroy(arg);
+        //     }
+        //     args.deinit();
+        // }
 
         if (self.peekTokenIs(token.RPAREN)) {
             self.nextToken();
@@ -547,62 +558,63 @@ test "Out of Memory, Program Statement, with Parser errors" {
 }
 
 test "Let Statement" {
-    const input =
-        \\let x = 5;
-        \\let y = 10;
-        \\let foobar = 838383;
-    ;
-    var l = Lexer.init(input);
-    var parser = try Parser.init(&l, testing.allocator);
-    defer parser.deinit();
-
-    const program = try parser.parseProgram();
-    defer program.deinit();
-    try checkParserErrors(&parser);
-
-    const len = 3;
-    try testing.expectEqual(len, program.statements.len);
-
-    const expecteds = [len]struct {
-        expected_identifiers: []const u8,
-    }{
-        .{ .expected_identifiers = "x" },
-        .{ .expected_identifiers = "y" },
-        .{ .expected_identifiers = "foobar" },
+    const let_tests = .{
+        .{ .input = "let x = 5;", .expected_identifier = "x", .expected_value = 5 },
+        .{ .input = "let y = true;", .expected_identifier = "y", .expected_value = true },
+        .{ .input = "let foobar = y;", .expected_identifier = "foobar", .expected_value = "y" },
     };
 
-    for (expecteds, 0..) |expected, i| {
-        try testLetStatement(program.statements[i], expected.expected_identifiers);
+    inline for (let_tests) |let_test| {
+        var l = Lexer.init(let_test.input);
+        var parser = try Parser.init(&l, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        const stmts = program.statements;
+        try testing.expectEqual(1, stmts.len);
+        try testLetStatement(stmts[0], let_test.expected_identifier);
+        const let_stmt = switch (stmts[0]) {
+            .let_statement => |let_stmt| let_stmt,
+            else => |other| {
+                const fmt = "Expect LetStatement, got {s}";
+                const type_name = @typeName(@TypeOf(other));
+                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
+            },
+        };
+        try testLiteralExpression(let_stmt.value.?, let_test.expected_value);
     }
 }
 
 test "Return Statement" {
-    const input =
-        \\return 5;
-        \\return 10;
-        \\return 993322;
-    ;
+    const return_tests = .{
+        .{ .input = "return 5;", .expected_value = 5 },
+        .{ .input = "return true;", .expected_value = true },
+        .{ .input = "return foobar;", .expected_value = "foobar" },
+    };
 
-    var l = Lexer.init(input);
-    var parser = try Parser.init(&l, testing.allocator);
-    defer parser.deinit();
+    inline for (return_tests) |return_test| {
+        var l = Lexer.init(return_test.input);
+        var parser = try Parser.init(&l, testing.allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+        try checkParserErrors(&parser);
 
-    const program = try parser.parseProgram();
-    defer program.deinit();
-    try checkParserErrors(&parser);
+        const stmts = program.statements;
+        try testing.expectEqual(1, stmts.len);
 
-    try testing.expectEqual(3, program.statements.len);
-
-    for (program.statements) |stmt| {
-        switch (stmt) {
-            .return_statement => {
-                try testing.expectEqualStrings("return", stmt.return_statement.tokenLiteral());
+        const return_stmt = switch (stmts[0]) {
+            .return_statement => |ret_stmt| ret_stmt,
+            else => |other| {
+                const fmt = "Expect ReturnStatement, got {s}";
+                const type_name = @typeName(@TypeOf(other));
+                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
             },
-            else => {
-                std.debug.print("stmt is not *ast.ReturnStatement. got={s}\n", .{@typeName(@TypeOf(stmt))});
-                continue;
-            },
-        }
+        };
+        try testing.expectEqualStrings("return", return_stmt.tokenLiteral());
+        try testLiteralExpression(return_stmt.return_value.?, return_test.expected_value);
     }
 }
 
