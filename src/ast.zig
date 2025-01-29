@@ -1,9 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const token = @import("./token.zig");
-
-pub const StringError = std.ArrayList(u8).Writer.Error;
+const token = @import("token.zig");
 
 pub const Node = union(enum) {
     program: Program,
@@ -12,17 +10,13 @@ pub const Node = union(enum) {
 
     pub fn tokenLiteral(self: *const Node) []const u8 {
         return switch (self.*) {
-            .program => self.program.tokenLiteral(),
-            .statement => self.statement.tokenLiteral(),
-            .expression => self.expression.tokenLiteral(),
+            inline else => |node| node.tokenLiteral(),
         };
     }
 
-    pub fn string(self: *const Node, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const Node, writer: anytype) anyerror!void {
         switch (self.*) {
-            .program => try self.program.string(writer),
-            .statement => try self.statement.string(writer),
-            .expression => try self.expression.string(writer),
+            inline else => |node| node.string(writer),
         }
     }
 };
@@ -46,7 +40,7 @@ pub const Program = struct {
         }
     }
 
-    pub fn string(self: *const Program, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const Program, writer: anytype) anyerror!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -71,7 +65,7 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn string(self: *const Statement, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const Statement, writer: anytype) anyerror!void {
         switch (self.*) {
             inline else => |stmt| try stmt.string(writer),
         }
@@ -87,7 +81,7 @@ pub const Statement = union(enum) {
 pub const LetStatement = struct {
     _token: token.Token,
     name: *const Identifier,
-    value: ?Expression,
+    value: Expression,
 
     pub fn tokenLiteral(self: *const LetStatement) []const u8 {
         return self._token.literal;
@@ -95,18 +89,16 @@ pub const LetStatement = struct {
 
     pub fn statementNode(_: *const LetStatement) void {}
 
-    pub fn string(self: *const LetStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const LetStatement, writer: anytype) anyerror!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
 
         try self.name.string(writer);
 
         try writer.writeAll(" = ");
-        if (self.value) |value| {
-            try value.string(writer);
-        } else {
-            try writer.writeAll("null");
-        }
+        try self.value.string(writer);
+
+        try writer.writeByte(';');
     }
 
     pub fn deinit(self: *const LetStatement, allocator: std.mem.Allocator) void {
@@ -116,7 +108,7 @@ pub const LetStatement = struct {
 
 pub const ReturnStatement = struct {
     _token: token.Token,
-    return_value: ?Expression,
+    return_value: Expression,
 
     pub fn statementNode(_: *const ReturnStatement) void {}
 
@@ -124,23 +116,22 @@ pub const ReturnStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ReturnStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const ReturnStatement, writer: anytype) anyerror!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
+        try self.return_value.string(writer);
 
-        if (self.return_value) |return_value| {
-            try return_value.string(writer);
-        } else {
-            try writer.writeAll("null");
-        }
+        try writer.writeByte(';');
     }
 
-    pub fn deinit(_: *const ReturnStatement, _: std.mem.Allocator) void {}
+    pub fn deinit(self: *const ReturnStatement, allocator: std.mem.Allocator) void {
+        self.return_value.deinit(allocator);
+    }
 };
 
 pub const ExpressionStatement = struct {
     _token: token.Token,
-    expression: ?Expression,
+    expression: Expression,
 
     pub fn statementNode(_: *const ExpressionStatement) void {}
 
@@ -148,18 +139,12 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
-        if (self.expression) |expression| {
-            try expression.string(writer);
-        } else {
-            try writer.writeAll("null");
-        }
+    pub fn string(self: *const ExpressionStatement, writer: anytype) anyerror!void {
+        try self.expression.string(writer);
     }
 
     pub fn deinit(self: *const ExpressionStatement, allocator: std.mem.Allocator) void {
-        if (self.expression) |exp| {
-            exp.deinit(allocator);
-        }
+        self.expression.deinit(allocator);
     }
 };
 
@@ -173,7 +158,7 @@ pub const BlockStatement = struct {
 
     pub fn statementNode(_: *const BlockStatement) void {}
 
-    pub fn string(self: *const BlockStatement, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const BlockStatement, writer: anytype) anyerror!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -209,7 +194,7 @@ pub const Expression = union(enum) {
         };
     }
 
-    pub fn string(self: *const Expression, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const Expression, writer: anytype) anyerror!void {
         switch (self.*) {
             inline else => |exp| try exp.string(writer),
         }
@@ -232,7 +217,7 @@ pub const Identifier = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const Identifier, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const Identifier, writer: anytype) anyerror!void {
         try writer.writeAll(self.value);
     }
 
@@ -249,7 +234,7 @@ pub const IntegerLiteral = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const IntegerLiteral, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const IntegerLiteral, writer: anytype) anyerror!void {
         try writer.writeAll(self._token.literal);
     }
 
@@ -267,7 +252,7 @@ pub const PrefixExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const PrefixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const PrefixExpression, writer: anytype) anyerror!void {
         try writer.writeByte('(');
         try writer.writeAll(self.operator);
         try self.right.string(writer);
@@ -292,7 +277,7 @@ pub const InfixExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const InfixExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const InfixExpression, writer: anytype) anyerror!void {
         try writer.writeByte('(');
         try self.left.string(writer);
         try writer.writeByte(' ');
@@ -320,7 +305,7 @@ pub const Boolean = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const Boolean, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const Boolean, writer: anytype) anyerror!void {
         try writer.writeAll(self._token.literal);
     }
 
@@ -339,7 +324,7 @@ pub const IfExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const IfExpression, writer: *std.ArrayList(u8).Writer) StringError!void {
+    pub fn string(self: *const IfExpression, writer: anytype) anyerror!void {
         try writer.writeAll("if");
         try self.condition.string(writer);
         try writer.writeByte(' ');
@@ -375,8 +360,8 @@ pub const FunctionLiteral = struct {
 
     pub fn string(
         self: *const FunctionLiteral,
-        writer: *std.ArrayList(u8).Writer,
-    ) StringError!void {
+        writer: anytype,
+    ) anyerror!void {
         try writer.writeAll(self.tokenLiteral());
         if (self.parameters.len > 0) {
             try self.parameters[0].string(writer);
@@ -413,8 +398,8 @@ pub const CallExpression = struct {
 
     pub fn string(
         self: *const CallExpression,
-        writer: *std.ArrayList(u8).Writer,
-    ) StringError!void {
+        writer: anytype,
+    ) anyerror!void {
         try self.function.string(writer);
         try writer.writeByte('(');
         if (self.arguments.len > 0) {
@@ -472,7 +457,7 @@ test "ast foo" {
     var writer = string.writer();
 
     try program.statements[0].string(&writer);
-    try testing.expectEqualStrings("let x = 10", string.items);
+    try testing.expectEqualStrings("let x = 10;", string.items);
 
     string.clearRetainingCapacity();
     try program.statements[1].string(&writer);
@@ -480,5 +465,5 @@ test "ast foo" {
 
     string.clearRetainingCapacity();
     try program.statements[2].string(&writer);
-    try testing.expectEqualStrings("return x", string.items);
+    try testing.expectEqualStrings("return x;", string.items);
 }

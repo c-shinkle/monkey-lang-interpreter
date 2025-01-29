@@ -1,17 +1,23 @@
 const std = @import("std");
 
-const lexer = @import("lexer.zig");
+const Lexer = @import("lexer.zig").Lexer;
+const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
 
 pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
     var bw = std.io.bufferedWriter(writer);
     const stdout = bw.writer();
 
-    var buffer: [1024]u8 = undefined;
-    var fbs: std.io.FixedBufferStream([]u8) = std.io.fixedBufferStream(&buffer);
+    var stdout_buffer: [1024]u8 = undefined;
+    var fbs: std.io.FixedBufferStream([]u8) = std.io.fixedBufferStream(&stdout_buffer);
     const fbs_writer = fbs.writer();
 
-    while (true) {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    while (true) : ({
+        fbs.reset();
+    }) {
         try stdout.print(">> ", .{});
         try bw.flush();
 
@@ -21,11 +27,20 @@ pub fn start(writer: std.fs.File.Writer, reader: std.fs.File.Reader) !void {
             return;
         }
 
-        var l = lexer.Lexer.init(input);
-        var tok = l.nextToken();
-        while (!std.mem.eql(u8, tok._type, token.EOF)) : (tok = l.nextToken()) {
-            try stdout.print("Type = \"{s}\" Literal = \"{s}\"\n", .{ tok._type, tok.literal });
+        var lexer = Lexer.init(input);
+        var parser = try Parser.init(&lexer, allocator);
+        defer parser.deinit();
+        const program = try parser.parseProgram();
+        defer program.deinit();
+
+        if (program.statements.len == 0) {
+            for (parser.errors.items) |_error| {
+                try stdout.print("\t{s}\n", .{_error});
+            }
+            continue;
         }
-        fbs.reset();
+
+        try program.string(&stdout);
+        try stdout.print("\n", .{});
     }
 }

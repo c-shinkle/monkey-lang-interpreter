@@ -40,7 +40,7 @@ const precedences = std.StaticStringMap(Precedence).initComptime(.{
     .{ token.LPAREN, Precedence.CALL },
 });
 
-const Parser = struct {
+pub const Parser = struct {
     lexer: *Lexer,
     cur_token: token.Token,
     peek_token: token.Token,
@@ -102,7 +102,7 @@ const Parser = struct {
 
     // Program
 
-    fn parseProgram(self: *Parser) ProgramError!ast.Program {
+    pub fn parseProgram(self: *Parser) ProgramError!ast.Program {
         var list = std.ArrayList(ast.Statement).init(self.allocator);
         errdefer {
             for (list.items) |stmt| {
@@ -583,7 +583,7 @@ test "Let Statement" {
                 @panic(std.fmt.comptimePrint(fmt, .{type_name}));
             },
         };
-        try testLiteralExpression(let_stmt.value.?, let_test.expected_value);
+        try testLiteralExpression(let_stmt.value, let_test.expected_value);
     }
 }
 
@@ -614,7 +614,7 @@ test "Return Statement" {
             },
         };
         try testing.expectEqualStrings("return", return_stmt.tokenLiteral());
-        try testLiteralExpression(return_stmt.return_value.?, return_test.expected_value);
+        try testLiteralExpression(return_stmt.return_value, return_test.expected_value);
     }
 }
 
@@ -638,7 +638,7 @@ test "Identifier Expression" {
             @panic(std.fmt.comptimePrint(fmt, .{type_name}));
         },
     };
-    const ident: ast.Identifier = switch (stmt.expression.?) {
+    const ident: ast.Identifier = switch (stmt.expression) {
         .identifier => |ident| ident,
         else => |ident| {
             const fmt = "Expect Identifier, got {s}";
@@ -671,7 +671,7 @@ test "Integer Literal Expression" {
             @panic(std.fmt.comptimePrint(fmt, .{type_name}));
         },
     };
-    const literal: ast.IntegerLiteral = switch (stmt.expression.?) {
+    const literal: ast.IntegerLiteral = switch (stmt.expression) {
         .integer_literal => |literal| literal,
         else => |exp| {
             const fmt = "Expect Integer Literal, got {s}";
@@ -707,7 +707,7 @@ test "Prefix Expression" {
             .expression_statement => |exp_stmt| exp_stmt,
             else => @panic("statement is not ast.ExpressionStatement"),
         };
-        const exp: ast.PrefixExpression = switch (prefix_stmt.expression.?) {
+        const exp: ast.PrefixExpression = switch (prefix_stmt.expression) {
             .prefix_expression => |prefix| prefix,
             else => @panic("statement was not ast.PrefixExpression"),
         };
@@ -750,7 +750,7 @@ test "Infix Expression" {
         };
 
         try testInfixExpression(
-            exp_stmt.expression.?,
+            exp_stmt.expression,
             infix_test.left_value,
             infix_test.operator,
             infix_test.right_value,
@@ -867,7 +867,7 @@ test "Operator Precedence" {
 
     var array_list = std.ArrayList(u8).init(testing.allocator);
     defer array_list.deinit();
-    var writer = array_list.writer();
+    const writer = array_list.writer();
     for (string_tests) |string_test| {
         var lexer = Lexer.init(string_test.input);
         var parser = try Parser.init(&lexer, testing.allocator);
@@ -904,11 +904,12 @@ test "Boolean Expression" {
         try testing.expectEqual(1, stmts.len);
 
         const boolean_expression = switch (stmts[0]) {
-            .expression_statement => |exp_stmt| switch (exp_stmt.expression.?) {
+            .expression_statement => |exp_stmt| switch (exp_stmt.expression) {
                 .boolean_expression => |boolean| boolean,
-                else => |e| {
-                    std.debug.print("exp not ast.BooleanExpression. got={s}\n", .{@typeName(@TypeOf(e))});
-                    unreachable;
+                else => |other| {
+                    const fmt = "exp not ast.BooleanExpression. got={s}\n";
+                    const type_name = @typeName(@TypeOf(other));
+                    @panic(std.fmt.comptimePrint(fmt, .{type_name}));
                 },
             },
             else => unreachable,
@@ -934,7 +935,7 @@ test "If Expression" {
         else => @panic("stmts[0] is not ast.ExpressionStatement"),
     };
 
-    const if_exp = switch (exp_stmt.expression.?) {
+    const if_exp = switch (exp_stmt.expression) {
         .if_expression => |if_exp| if_exp,
         else => |other| {
             const fmt = "Expect IfExpression, got {s}";
@@ -951,7 +952,7 @@ test "If Expression" {
         .expression_statement => |con_stmt| con_stmt,
         else => @panic("if_exp.consequence.statements[0] is not ast.ExpressionStatement"),
     };
-    try testIdentifier(consequence.expression.?, "abc");
+    try testIdentifier(consequence.expression, "abc");
     try testing.expectEqual(if_exp.alternative, null);
 }
 
@@ -971,7 +972,7 @@ test "If Else Expression" {
         else => @panic("stmts[0] is not ast.ExpressionStatement"),
     };
 
-    const if_exp = switch (exp_stmt.expression.?) {
+    const if_exp = switch (exp_stmt.expression) {
         .if_expression => |if_exp| if_exp,
         else => |other| {
             const fmt = "Expect IfExpression, got {s}";
@@ -987,15 +988,15 @@ test "If Else Expression" {
         .expression_statement => |con_stmt| con_stmt,
         else => @panic("if_exp.consequence.statements[0] is not ast.ExpressionStatement"),
     };
-    try testIdentifier(consequence.expression.?, "x");
+    try testIdentifier(consequence.expression, "x");
 
-    const alternative = if (if_exp.alternative) |alt| alt else return error.TestExpectedEqual;
+    const alternative = if_exp.alternative orelse return error.TestExpectedEqual;
     try testing.expectEqual(1, alternative.statements.len);
     const alt_stmt = switch (alternative.statements[0]) {
         .expression_statement => |alt_stmt| alt_stmt,
         else => @panic("if_exp.alternative.statements[0] is not ast.ExpressionStatement"),
     };
-    try testIdentifier(alt_stmt.expression.?, "y");
+    try testIdentifier(alt_stmt.expression, "y");
 }
 
 test "Function Literal Expression" {
@@ -1014,7 +1015,7 @@ test "Function Literal Expression" {
         else => @panic("stmts[0] is not ast.ExpressionStatement"),
     };
 
-    const fn_lit = switch (fn_lit_exp_stmt.expression.?) {
+    const fn_lit = switch (fn_lit_exp_stmt.expression) {
         .function_literal => |fn_lit| fn_lit,
         else => |other| {
             const fmt = "Expect FunctionLiteral, got {s}";
@@ -1034,7 +1035,7 @@ test "Function Literal Expression" {
         .expression_statement => |exp_stmt| exp_stmt,
         else => @panic("stmts[0] is not ast.ExpressionStatement"),
     };
-    try testInfixExpression(body_exp_stmt.expression.?, "x", "+", "y");
+    try testInfixExpression(body_exp_stmt.expression, "x", "+", "y");
 }
 
 test "Function Parameter Parsing" {
@@ -1067,7 +1068,7 @@ test "Function Parameter Parsing" {
             .expression_statement => |stmt| stmt,
             else => @panic("stmts[0] is not ast.ExpressionStatement"),
         };
-        const function = switch (stmt.expression.?) {
+        const function = switch (stmt.expression) {
             .function_literal => |function| function,
             else => |other| {
                 const fmt = "Expect FunctionLiteral, got {s}";
@@ -1103,7 +1104,7 @@ test "Call Expression Parsing" {
             @panic(std.fmt.comptimePrint(fmt, .{type_name}));
         },
     };
-    const call_exp = switch (exp_stmt.expression.?) {
+    const call_exp = switch (exp_stmt.expression) {
         .call_expression => |call_exp| call_exp,
         else => |other| {
             const fmt = "Expect CallExpression, got {s}";
