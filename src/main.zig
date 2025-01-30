@@ -4,15 +4,15 @@ const repl = @import("repl");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var buffered_writer = std.io.bufferedWriter(stdout_file);
+    const stdout = buffered_writer.writer();
 
     try stdout.print("Hello! This is the Monkey Programming Language!\n", .{});
     try stdout.print("Feel free to type in commands!\n", .{});
-    try bw.flush();
+    try buffered_writer.flush();
 
     try repl.start(stdout_file, std.io.getStdIn().reader());
 
     try stdout.print("Bye bye!\n", .{});
-    try bw.flush();
+    try buffered_writer.flush();
 }

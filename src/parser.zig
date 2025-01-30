@@ -469,16 +469,10 @@ pub const Parser = struct {
     fn parseCallArguments(self: *Parser) ExpressionError![]const *ast.Expression {
         var args = std.ArrayList(*ast.Expression).init(self.allocator);
         errdefer {
-            for (args.items) |arg| {
+            if (args.items.len > 0) for (args.items[1..]) |arg| {
                 arg.deinit(self.allocator);
                 self.allocator.destroy(arg);
-            }
-            // var i: usize = 1;
-            // while (i < args.items.len) : (i += 1) {
-            //     const arg = args.items[i];
-            //     arg.deinit(self.allocator);
-            //     self.allocator.destroy(arg);
-            // }
+            };
             args.deinit();
         }
 
@@ -490,17 +484,10 @@ pub const Parser = struct {
         self.nextToken();
 
         const first_temp = try self.allocator.create(ast.Expression);
-        // errdefer self.allocator.destroy(first_temp);
-        first_temp.* = self.parseExpression(Precedence.LOWEST) catch |parse_error| {
-            self.allocator.destroy(first_temp);
-            return parse_error;
-        };
-        // errdefer first_temp.deinit(self.allocator);
-        args.append(first_temp) catch |append_error| {
-            first_temp.deinit(self.allocator);
-            self.allocator.destroy(first_temp);
-            return append_error;
-        };
+        errdefer self.allocator.destroy(first_temp);
+        first_temp.* = try self.parseExpression(Precedence.LOWEST);
+        errdefer first_temp.deinit(self.allocator);
+        try args.append(first_temp);
 
         while (self.peekTokenIs(token.COMMA)) {
             self.nextToken();
