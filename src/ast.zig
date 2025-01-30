@@ -221,7 +221,10 @@ pub const Identifier = struct {
         try writer.writeAll(self.value);
     }
 
-    pub fn deinit(_: *const Identifier, _: std.mem.Allocator) void {}
+    pub fn deinit(self: *const Identifier, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
+    }
 };
 
 pub const IntegerLiteral = struct {
@@ -309,7 +312,10 @@ pub const Boolean = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn deinit(_: *const Boolean, _: std.mem.Allocator) void {}
+    pub fn deinit(self: *const Boolean, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
+    }
 };
 
 pub const IfExpression = struct {
@@ -456,14 +462,11 @@ test "ast foo" {
     defer string.deinit();
     var writer = string.writer();
 
-    try program.statements[0].string(&writer);
-    try testing.expectEqualStrings("let x = 10;", string.items);
+    const string_tests = [_][]const u8{ "let x = 10;", "10", "return x;" };
 
-    string.clearRetainingCapacity();
-    try program.statements[1].string(&writer);
-    try testing.expectEqualStrings("10", string.items);
-
-    string.clearRetainingCapacity();
-    try program.statements[2].string(&writer);
-    try testing.expectEqualStrings("return x;", string.items);
+    for (string_tests, 0..) |string_test, i| {
+        try program.statements[i].string(&writer);
+        try testing.expectEqualStrings(string_test, string.items);
+        string.clearRetainingCapacity();
+    }
 }
