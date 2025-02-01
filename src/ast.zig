@@ -241,7 +241,10 @@ pub const IntegerLiteral = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn deinit(_: *const IntegerLiteral, _: std.mem.Allocator) void {}
+    pub fn deinit(self: *const IntegerLiteral, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
+    }
 };
 
 pub const PrefixExpression = struct {
@@ -331,12 +334,12 @@ pub const IfExpression = struct {
     }
 
     pub fn string(self: *const IfExpression, writer: anytype) anyerror!void {
-        try writer.writeAll("if");
+        try writer.writeAll("if ");
         try self.condition.string(writer);
         try writer.writeByte(' ');
         try self.consequence.string(writer);
         if (self.alternative) |alt| {
-            try writer.writeAll("else ");
+            try writer.writeAll(" else ");
             try alt.string(writer);
         }
     }
@@ -364,10 +367,7 @@ pub const FunctionLiteral = struct {
         return self._token.literal;
     }
 
-    pub fn string(
-        self: *const FunctionLiteral,
-        writer: anytype,
-    ) anyerror!void {
+    pub fn string(self: *const FunctionLiteral, writer: anytype) anyerror!void {
         try writer.writeAll(self.tokenLiteral());
         if (self.parameters.len > 0) {
             try self.parameters[0].string(writer);
@@ -423,9 +423,7 @@ pub const CallExpression = struct {
             arg.deinit(allocator);
             allocator.destroy(arg);
         }
-
         allocator.free(self.arguments);
-
         allocator.destroy(self.function);
     }
 };

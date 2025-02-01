@@ -11,7 +11,7 @@ pub fn main() !void {
     try stdout.print("Feel free to type in commands!\n", .{});
     try buffered_writer.flush();
 
-    try repl.start(stdout_file, std.io.getStdIn().reader());
+    try repl.start(@TypeOf(buffered_writer), &buffered_writer);
 
     try stdout.print("Bye bye!\n", .{});
     try buffered_writer.flush();

@@ -5,19 +5,18 @@ const ast = @import("ast.zig");
 const Lexer = @import("lexer.zig").Lexer;
 const token = @import("token.zig");
 
-// TODO screw it, just condense these all down to one set called ParserError and call it a day
-const ProgramError = std.mem.Allocator.Error || std.fmt.AllocPrintError;
-const StatementError = error{ MissingLetAssign, MissingLetIdentifier } || std.mem.Allocator.Error;
-const ExpressionError = error{
+const ParserError = error{
+    MissingLetAssign,
+    MissingLetIdentifier,
     MissingLeftBrace,
     MissingLeftParenthesis,
     MissingRightBrace,
     MissingRightParenthesis,
     UnknownPrefixToken,
-} || StatementError || std.fmt.ParseIntError || std.mem.Allocator.Error;
+} || std.mem.Allocator.Error || std.fmt.AllocPrintError || std.fmt.ParseIntError;
 
-const PrefixParseFn = *const fn (self: *Parser) ExpressionError!ast.Expression;
-const InfixParseFn = *const fn (self: *Parser, lhs: ast.Expression) ExpressionError!ast.Expression;
+const PrefixParseFn = *const fn (self: *Parser) ParserError!ast.Expression;
+const InfixParseFn = *const fn (self: *Parser, lhs: ast.Expression) ParserError!ast.Expression;
 
 const Precedence = enum {
     LOWEST,
@@ -103,7 +102,7 @@ pub const Parser = struct {
 
     // Program
 
-    pub fn parseProgram(self: *Parser) ProgramError!ast.Program {
+    pub fn parseProgram(self: *Parser) ParserError!ast.Program {
         var list = std.ArrayList(ast.Statement).init(self.allocator);
         errdefer {
             for (list.items) |stmt| {
@@ -123,21 +122,21 @@ pub const Parser = struct {
             if (maybe_stmt) |stmt| {
                 try list.append(stmt);
             } else |err| switch (err) {
-                ExpressionError.UnknownPrefixToken,
-                ExpressionError.MissingLetIdentifier,
-                ExpressionError.MissingLetAssign,
-                ExpressionError.MissingLeftParenthesis,
-                ExpressionError.MissingRightParenthesis,
-                ExpressionError.MissingLeftBrace,
-                ExpressionError.MissingRightBrace,
+                ParserError.UnknownPrefixToken,
+                ParserError.MissingLetIdentifier,
+                ParserError.MissingLetAssign,
+                ParserError.MissingLeftParenthesis,
+                ParserError.MissingRightParenthesis,
+                ParserError.MissingLeftBrace,
+                ParserError.MissingRightBrace,
                 => {},
-                ExpressionError.InvalidCharacter, ExpressionError.Overflow => {
+                ParserError.InvalidCharacter, ParserError.Overflow => {
                     const fmt = "could not parse {s} as integer";
                     const msg = try std.fmt.allocPrint(self.allocator, fmt, .{self.cur_token.literal});
                     errdefer self.allocator.free(msg);
                     try self.errors.append(msg);
                 },
-                ExpressionError.OutOfMemory => return ProgramError.OutOfMemory,
+                ParserError.OutOfMemory => return ParserError.OutOfMemory,
             }
 
             self.nextToken();
@@ -151,7 +150,7 @@ pub const Parser = struct {
 
     // Statement
 
-    fn parseStatement(self: *Parser) ExpressionError!ast.Statement {
+    fn parseStatement(self: *Parser) ParserError!ast.Statement {
         if (std.mem.eql(u8, token.LET, self.cur_token._type)) {
             const let_statement = try self.parseLetStatement();
             return ast.Statement{ .let_statement = let_statement };
@@ -164,12 +163,12 @@ pub const Parser = struct {
         }
     }
 
-    fn parseLetStatement(self: *Parser) ExpressionError!ast.LetStatement {
+    fn parseLetStatement(self: *Parser) ParserError!ast.LetStatement {
         const let_token = self.cur_token;
 
         if (!self.expectPeek(token.IDENT)) {
             try self.peekErrors(token.IDENT);
-            return StatementError.MissingLetIdentifier;
+            return ParserError.MissingLetIdentifier;
         }
 
         const name = try self.allocator.create(ast.Identifier);
@@ -181,7 +180,7 @@ pub const Parser = struct {
 
         if (!self.expectPeek(token.ASSIGN)) {
             try self.peekErrors(token.ASSIGN);
-            return StatementError.MissingLetAssign;
+            return ParserError.MissingLetAssign;
         }
 
         self.nextToken();
@@ -195,7 +194,7 @@ pub const Parser = struct {
         return ast.LetStatement{ ._token = let_token, .name = name, .value = value };
     }
 
-    pub fn parseReturnStatement(self: *Parser) ExpressionError!ast.ReturnStatement {
+    pub fn parseReturnStatement(self: *Parser) ParserError!ast.ReturnStatement {
         const _token = self.cur_token;
 
         self.nextToken();
@@ -209,7 +208,7 @@ pub const Parser = struct {
         return ast.ReturnStatement{ ._token = _token, .return_value = return_value };
     }
 
-    pub fn parseExpressionStatement(self: *Parser) ExpressionError!ast.ExpressionStatement {
+    pub fn parseExpressionStatement(self: *Parser) ParserError!ast.ExpressionStatement {
         const cur_token = self.cur_token;
         const expression = try self.parseExpression(Precedence.LOWEST);
 
@@ -220,7 +219,7 @@ pub const Parser = struct {
         return ast.ExpressionStatement{ ._token = cur_token, .expression = expression };
     }
 
-    pub fn parseBlockStatement(self: *Parser) ExpressionError!ast.BlockStatement {
+    pub fn parseBlockStatement(self: *Parser) ParserError!ast.BlockStatement {
         const _token = self.cur_token;
         var statements = std.ArrayList(ast.Statement).init(self.allocator);
         self.nextToken();
@@ -236,11 +235,11 @@ pub const Parser = struct {
 
     // Expression
 
-    pub fn parseExpression(self: *Parser, precedence: Precedence) ExpressionError!ast.Expression {
+    pub fn parseExpression(self: *Parser, precedence: Precedence) ParserError!ast.Expression {
         const precedence_int = @intFromEnum(precedence);
         const prefix = self.prefix_parse_fns.get(self.cur_token._type) orelse {
             try self.noPrefixParseFnError(self.cur_token._type);
-            return ExpressionError.UnknownPrefixToken;
+            return ParserError.UnknownPrefixToken;
         };
 
         var left_exp = try prefix(self);
@@ -256,12 +255,12 @@ pub const Parser = struct {
         return left_exp;
     }
 
-    fn parseIdentifier(self: *const Parser) ExpressionError!ast.Expression {
+    fn parseIdentifier(self: *const Parser) ParserError!ast.Expression {
         const identifier = ast.Identifier{ ._token = self.cur_token, .value = self.cur_token.literal };
         return ast.Expression{ .identifier = identifier };
     }
 
-    fn parseIntegerLiteral(self: *Parser) ExpressionError!ast.Expression {
+    fn parseIntegerLiteral(self: *Parser) ParserError!ast.Expression {
         const cur_token = self.cur_token;
         const value = try std.fmt.parseInt(i64, cur_token.literal, 10);
 
@@ -269,7 +268,7 @@ pub const Parser = struct {
         return ast.Expression{ .integer_literal = integer_literal };
     }
 
-    fn parsePrefixExpression(self: *Parser) ExpressionError!ast.Expression {
+    fn parsePrefixExpression(self: *Parser) ParserError!ast.Expression {
         const _token = self.cur_token;
         const operator = self.cur_token.literal;
 
@@ -286,7 +285,7 @@ pub const Parser = struct {
         } };
     }
 
-    fn parseInfixExpression(self: *Parser, lhs: ast.Expression) ExpressionError!ast.Expression {
+    fn parseInfixExpression(self: *Parser, lhs: ast.Expression) ParserError!ast.Expression {
         const _token = self.cur_token;
         const operator = self.cur_token.literal;
 
@@ -309,29 +308,29 @@ pub const Parser = struct {
         } };
     }
 
-    fn parseBoolean(self: *Parser) ExpressionError!ast.Expression {
+    fn parseBoolean(self: *Parser) ParserError!ast.Expression {
         return ast.Expression{ .boolean_expression = ast.Boolean{
             ._token = self.cur_token,
             .value = self.curTokenIs(token.TRUE),
         } };
     }
 
-    fn parseGroupedExpression(self: *Parser) ExpressionError!ast.Expression {
+    fn parseGroupedExpression(self: *Parser) ParserError!ast.Expression {
         self.nextToken();
 
         const exp = try self.parseExpression(Precedence.LOWEST);
 
         if (!self.expectPeek(token.RPAREN)) {
-            return ExpressionError.MissingRightParenthesis;
+            return ParserError.MissingRightParenthesis;
         }
 
         return exp;
     }
 
-    fn parseIfExpression(self: *Parser) ExpressionError!ast.Expression {
+    fn parseIfExpression(self: *Parser) ParserError!ast.Expression {
         const _token = self.cur_token;
         if (!self.expectPeek(token.LPAREN)) {
-            return ExpressionError.MissingLeftParenthesis;
+            return ParserError.MissingLeftParenthesis;
         }
         self.nextToken();
 
@@ -341,10 +340,10 @@ pub const Parser = struct {
         errdefer condition.deinit(self.allocator);
 
         if (!self.expectPeek(token.RPAREN)) {
-            return ExpressionError.MissingRightParenthesis;
+            return ParserError.MissingRightParenthesis;
         }
         if (!self.expectPeek(token.LBRACE)) {
-            return ExpressionError.MissingLeftBrace;
+            return ParserError.MissingLeftBrace;
         }
 
         const consequence = try self.allocator.create(ast.BlockStatement);
@@ -357,7 +356,7 @@ pub const Parser = struct {
             self.nextToken();
 
             if (!self.expectPeek(token.LBRACE)) {
-                return ExpressionError.MissingLeftBrace;
+                return ParserError.MissingLeftBrace;
             }
             maybe_alt = try self.allocator.create(ast.BlockStatement);
             errdefer self.allocator.destroy(maybe_alt.?);
@@ -375,10 +374,10 @@ pub const Parser = struct {
         };
     }
 
-    fn parseFunctionLiteral(self: *Parser) ExpressionError!ast.Expression {
+    fn parseFunctionLiteral(self: *Parser) ParserError!ast.Expression {
         const _token = self.cur_token;
         if (!self.expectPeek(token.LPAREN)) {
-            return ExpressionError.MissingLeftParenthesis;
+            return ParserError.MissingLeftParenthesis;
         }
         const parameters = try self.parseFunctionParameters();
         errdefer {
@@ -404,7 +403,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseFunctionParameters(self: *Parser) ExpressionError![]const *ast.Identifier {
+    fn parseFunctionParameters(self: *Parser) ParserError![]const *ast.Identifier {
         var identifiers = std.ArrayList(*ast.Identifier).init(self.allocator);
         errdefer {
             for (identifiers.items) |ident| {
@@ -444,13 +443,13 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(token.RPAREN)) {
-            return ExpressionError.MissingRightParenthesis;
+            return ParserError.MissingRightParenthesis;
         }
 
         return try identifiers.toOwnedSlice();
     }
 
-    fn parseCallExpression(self: *Parser, lhs: ast.Expression) ExpressionError!ast.Expression {
+    fn parseCallExpression(self: *Parser, lhs: ast.Expression) ParserError!ast.Expression {
         const function = try self.allocator.create(ast.Expression);
         errdefer self.allocator.destroy(function);
         function.* = lhs;
@@ -466,7 +465,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseCallArguments(self: *Parser) ExpressionError![]const *ast.Expression {
+    fn parseCallArguments(self: *Parser) ParserError![]const *ast.Expression {
         var args = std.ArrayList(*ast.Expression).init(self.allocator);
         errdefer {
             if (args.items.len > 0) for (args.items[1..]) |arg| {
@@ -500,7 +499,7 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(token.RPAREN)) {
-            return ExpressionError.MissingRightParenthesis;
+            return ParserError.MissingRightParenthesis;
         }
 
         return try args.toOwnedSlice();
