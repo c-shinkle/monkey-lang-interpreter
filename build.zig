@@ -53,12 +53,17 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(parser_unit_tests);
     const run_parser_unit_tests = b.addRunArtifact(parser_unit_tests);
     test_step.dependOn(&run_parser_unit_tests.step);
-    const parser_module = b.addModule("token", .{
-        .root_source_file = b.path("src/parser.zig"),
+
+    const object_unit_tests = b.addTest(.{
+        .name = "object_tests",
+        .root_source_file = b.path("src/object.zig"),
         .target = target,
         .optimize = optimize,
     });
-    _ = parser_module;
+
+    b.installArtifact(object_unit_tests);
+    const run_object_unit_tests = b.addRunArtifact(object_unit_tests);
+    test_step.dependOn(&run_object_unit_tests.step);
 
     const exe = b.addExecutable(.{
         .name = "monkey-lang-interpreter",
