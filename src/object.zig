@@ -8,7 +8,7 @@ const INTEGER_OBJ = "INTEGER";
 const BOOLEAN_OBJ = "BOOLEAN";
 const NULL_OBJ = "NULL";
 
-const Object = union(enum) {
+pub const Object = union(enum) {
     integer: Integer,
     boolean: Boolean,
     _null: Null,
@@ -26,7 +26,7 @@ const Object = union(enum) {
     }
 };
 
-const Integer = struct {
+pub const Integer = struct {
     value: i64,
 
     pub fn inspect(self: Integer, allocator: std.mem.Allocator) ObjectError![]const u8 {
@@ -38,7 +38,7 @@ const Integer = struct {
     }
 };
 
-const Boolean = struct {
+pub const Boolean = struct {
     value: bool,
 
     pub fn inspect(self: *const Boolean, allocator: std.mem.Allocator) ObjectError![]const u8 {
@@ -50,7 +50,7 @@ const Boolean = struct {
     }
 };
 
-const Null = struct {
+pub const Null = struct {
     pub fn inspect(_: *const Null, allocator: std.mem.Allocator) ObjectError![]const u8 {
         return std.fmt.allocPrint(allocator, "null", .{});
     }

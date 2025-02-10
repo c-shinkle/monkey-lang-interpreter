@@ -3,6 +3,9 @@ const std = @import("std");
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
+const ast = @import("ast.zig");
+const evaluator = @import("evaluator.zig");
+const object = @import("object.zig");
 
 pub fn start(BufferWriter: type, buffered_writer: *BufferWriter) !void {
     const stdout = buffered_writer.writer();
@@ -33,8 +36,8 @@ pub fn start(BufferWriter: type, buffered_writer: *BufferWriter) !void {
         defer program.deinit();
 
         if (program.statements.len > 0) {
-            try program.string(&stdout);
-            try stdout.print("\n", .{});
+            const evaluated = evaluator.eval(ast.Node{ .program = program }).?;
+            try stdout.print("{s}\n", .{try evaluated.inspect(allocator)});
             try buffered_writer.flush();
         } else {
             for (parser.errors.items) |err| {
