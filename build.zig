@@ -3,67 +3,12 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
     const test_step = b.step("test", "Run unit tests");
 
-    const token_unit_tests = b.addTest(.{
-        .name = "token_tests",
-        .root_source_file = b.path("src/token.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    b.installArtifact(token_unit_tests);
-    const run_token_unit_tests = b.addRunArtifact(token_unit_tests);
-    test_step.dependOn(&run_token_unit_tests.step);
-
-    const lexer_unit_tests = b.addTest(.{
-        .name = "lexer_tests",
-        .root_source_file = b.path("src/lexer.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    b.installArtifact(lexer_unit_tests);
-    const run_lexer_unit_tests = b.addRunArtifact(lexer_unit_tests);
-    test_step.dependOn(&run_lexer_unit_tests.step);
-
-    const repl_module = b.addModule("repl", .{
-        .root_source_file = b.path("src/repl.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const ast_unit_tests = b.addTest(.{
-        .name = "ast_tests",
-        .root_source_file = b.path("src/ast.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    b.installArtifact(ast_unit_tests);
-    const run_ast_unit_tests = b.addRunArtifact(ast_unit_tests);
-    test_step.dependOn(&run_ast_unit_tests.step);
-
-    const parser_unit_tests = b.addTest(.{
-        .name = "parser_tests",
-        .root_source_file = b.path("src/parser.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    b.installArtifact(parser_unit_tests);
-    const run_parser_unit_tests = b.addRunArtifact(parser_unit_tests);
-    test_step.dependOn(&run_parser_unit_tests.step);
-
-    const object_unit_tests = b.addTest(.{
-        .name = "object_tests",
-        .root_source_file = b.path("src/object.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    b.installArtifact(object_unit_tests);
-    const run_object_unit_tests = b.addRunArtifact(object_unit_tests);
-    test_step.dependOn(&run_object_unit_tests.step);
+    compile_unit_tests(b, "token_tests", "src/token.zig", target, optimize, test_step);
+    compile_unit_tests(b, "ast_tests", "src/ast.zig", target, optimize, test_step);
+    compile_unit_tests(b, "parser_tests", "src/parser.zig", target, optimize, test_step);
+    compile_unit_tests(b, "object_tests", "src/object.zig", target, optimize, test_step);
 
     const exe = b.addExecutable(.{
         .name = "monkey-lang-interpreter",
@@ -71,11 +16,29 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("repl", repl_module);
     b.installArtifact(exe);
-
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+}
+
+fn compile_unit_tests(
+    b: *std.Build,
+    name: []const u8,
+    path: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    test_step: *std.Build.Step,
+) void {
+    const unit_tests = b.addTest(.{
+        .name = name,
+        .root_source_file = b.path(path),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.installArtifact(unit_tests);
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    test_step.dependOn(&run_unit_tests.step);
 }

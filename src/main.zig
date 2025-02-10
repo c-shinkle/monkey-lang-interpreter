@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const repl = @import("repl");
+const repl = @import("repl.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
