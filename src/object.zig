@@ -14,7 +14,7 @@ pub const Object = union(enum) {
     boolean: Boolean,
     _null: Null,
 
-    pub fn inspect(self: *const Object, writer: *AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Object, writer: *const AnyWriter) AnyWriter.Error!void {
         switch (self.*) {
             inline else => |obj| try obj.inspect(writer),
         }
@@ -30,7 +30,7 @@ pub const Object = union(enum) {
 pub const Integer = struct {
     value: i64,
 
-    pub fn inspect(self: Integer, writer: *AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: Integer, writer: *const AnyWriter) AnyWriter.Error!void {
         return try writer.print("{d}", .{self.value});
     }
 
@@ -43,7 +43,7 @@ pub const Integer = struct {
 pub const Boolean = struct {
     value: bool,
 
-    pub fn inspect(self: *const Boolean, writer: *AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Boolean, writer: *const AnyWriter) AnyWriter.Error!void {
         return try writer.print("{any}", .{self.value});
     }
 
@@ -54,7 +54,7 @@ pub const Boolean = struct {
 };
 
 pub const Null = struct {
-    pub fn inspect(self: *const Null, writer: *AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Null, writer: *const AnyWriter) AnyWriter.Error!void {
         _ = self; // autofix
         return try writer.print("null", .{});
     }

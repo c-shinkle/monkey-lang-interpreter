@@ -7,24 +7,23 @@ const object = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
 
-pub fn start(buffered_writer: *std.io.BufferedWriter(4096, @TypeOf(std.io.getStdOut().writer()))) !void {
-    var stdout = buffered_writer.writer().any();
-
-    var reader = std.io.getStdIn().reader();
-
-    var stdout_buffer: [1024]u8 = undefined;
-    var fixed_buffer_stream: std.io.FixedBufferStream([]u8) = std.io.fixedBufferStream(&stdout_buffer);
-    const fbs_writer = fixed_buffer_stream.writer();
+pub fn start(stdout: std.io.AnyWriter) !void {
+    const buffers_size = 4096;
+    var stdin_reader = std.io.getStdIn().reader();
 
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = general_purpose_allocator.allocator();
 
-    while (true) : (fixed_buffer_stream.reset()) {
-        try stdout.print(">> ", .{});
-        try buffered_writer.flush();
+    var stdout_buffer = std.io.bufferedWriter(stdout);
+    var buffer_writer = stdout_buffer.writer().any();
 
-        try reader.streamUntilDelimiter(fbs_writer, '\n', 1024);
-        const input = fixed_buffer_stream.getWritten();
+    try stdout.print(">> ", .{});
+    while (true) : ({
+        try buffer_writer.print("\n>> ", .{});
+        try stdout_buffer.flush();
+    }) {
+        var stream: [buffers_size]u8 = undefined;
+        const input = try stdin_reader.readUntilDelimiter(&stream, '\n');
         if (std.mem.eql(u8, input, "exit")) {
             return;
         }
@@ -37,12 +36,10 @@ pub fn start(buffered_writer: *std.io.BufferedWriter(4096, @TypeOf(std.io.getStd
 
         if (program.statements.len > 0) {
             const evaluated = evaluator.eval(ast.Node{ .program = program }).?;
-            try evaluated.inspect(&stdout);
-            try stdout.print("\n", .{});
-            try buffered_writer.flush();
+            try evaluated.inspect(&buffer_writer);
         } else {
             for (parser.errors.items) |err| {
-                try stdout.print("\t{s}\n", .{err});
+                try buffer_writer.print("\t{s}\n", .{err});
             }
         }
     }
