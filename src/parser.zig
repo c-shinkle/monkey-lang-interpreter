@@ -222,6 +222,12 @@ pub const Parser = struct {
     pub fn parseBlockStatement(self: *Parser) ParserError!ast.BlockStatement {
         const _token = self.cur_token;
         var statements = std.ArrayList(ast.Statement).init(self.allocator);
+        errdefer {
+            for (statements.items) |stmt| {
+                stmt.deinit(self.allocator);
+            }
+            statements.deinit();
+        }
         self.nextToken();
 
         while (!self.curTokenIs(token.RBRACE) and !self.curTokenIs(token.EOF)) : (self.nextToken()) {
@@ -915,7 +921,7 @@ test "Operator Precedence" {
 
     var array_list = std.ArrayList(u8).init(testing.allocator);
     defer array_list.deinit();
-    const writer = array_list.writer();
+    var writer = array_list.writer().any();
     for (string_tests) |string_test| {
         var lexer = Lexer.init(string_test.input);
         var parser = try Parser.init(&lexer, testing.allocator);

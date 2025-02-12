@@ -14,7 +14,7 @@ pub const Node = union(enum) {
         };
     }
 
-    pub fn string(self: *const Node, writer: anytype) anyerror!void {
+    pub fn string(self: *const Node, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         switch (self.*) {
             inline else => |node| node.string(writer),
         }
@@ -40,7 +40,7 @@ pub const Program = struct {
         }
     }
 
-    pub fn string(self: *const Program, writer: anytype) anyerror!void {
+    pub fn string(self: *const Program, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -65,7 +65,7 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn string(self: *const Statement, writer: anytype) anyerror!void {
+    pub fn string(self: *const Statement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         switch (self.*) {
             inline else => |stmt| try stmt.string(writer),
         }
@@ -89,7 +89,7 @@ pub const LetStatement = struct {
 
     pub fn statementNode(_: *const LetStatement) void {}
 
-    pub fn string(self: *const LetStatement, writer: anytype) anyerror!void {
+    pub fn string(self: *const LetStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
 
@@ -116,7 +116,7 @@ pub const ReturnStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ReturnStatement, writer: anytype) anyerror!void {
+    pub fn string(self: *const ReturnStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
         try self.return_value.string(writer);
@@ -139,7 +139,7 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement, writer: anytype) anyerror!void {
+    pub fn string(self: *const ExpressionStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try self.expression.string(writer);
     }
 
@@ -158,7 +158,7 @@ pub const BlockStatement = struct {
 
     pub fn statementNode(_: *const BlockStatement) void {}
 
-    pub fn string(self: *const BlockStatement, writer: anytype) anyerror!void {
+    pub fn string(self: *const BlockStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -194,7 +194,7 @@ pub const Expression = union(enum) {
         };
     }
 
-    pub fn string(self: *const Expression, writer: anytype) anyerror!void {
+    pub fn string(self: *const Expression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         switch (self.*) {
             inline else => |exp| try exp.string(writer),
         }
@@ -217,7 +217,7 @@ pub const Identifier = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const Identifier, writer: anytype) anyerror!void {
+    pub fn string(self: *const Identifier, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll(self.value);
     }
 
@@ -237,7 +237,7 @@ pub const IntegerLiteral = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const IntegerLiteral, writer: anytype) anyerror!void {
+    pub fn string(self: *const IntegerLiteral, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll(self._token.literal);
     }
 
@@ -258,7 +258,7 @@ pub const PrefixExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const PrefixExpression, writer: anytype) anyerror!void {
+    pub fn string(self: *const PrefixExpression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeByte('(');
         try writer.writeAll(self.operator);
         try self.right.string(writer);
@@ -283,7 +283,7 @@ pub const InfixExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const InfixExpression, writer: anytype) anyerror!void {
+    pub fn string(self: *const InfixExpression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeByte('(');
         try self.left.string(writer);
         try writer.writeByte(' ');
@@ -311,7 +311,7 @@ pub const Boolean = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const Boolean, writer: anytype) anyerror!void {
+    pub fn string(self: *const Boolean, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll(self._token.literal);
     }
 
@@ -333,7 +333,7 @@ pub const IfExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const IfExpression, writer: anytype) anyerror!void {
+    pub fn string(self: *const IfExpression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll("if ");
         try self.condition.string(writer);
         try writer.writeByte(' ');
@@ -367,7 +367,7 @@ pub const FunctionLiteral = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const FunctionLiteral, writer: anytype) anyerror!void {
+    pub fn string(self: *const FunctionLiteral, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
         try writer.writeAll(self.tokenLiteral());
         if (self.parameters.len > 0) {
             try self.parameters[0].string(writer);
@@ -404,8 +404,8 @@ pub const CallExpression = struct {
 
     pub fn string(
         self: *const CallExpression,
-        writer: anytype,
-    ) anyerror!void {
+        writer: *std.io.AnyWriter,
+    ) std.io.AnyWriter.Error!void {
         try self.function.string(writer);
         try writer.writeByte('(');
         if (self.arguments.len > 0) {
@@ -458,7 +458,7 @@ test "ast foo" {
 
     var string = std.ArrayList(u8).init(allocator);
     defer string.deinit();
-    var writer = string.writer();
+    var writer = string.writer().any();
 
     const string_tests = [_][]const u8{ "let x = 10;", "10", "return x;" };
 
