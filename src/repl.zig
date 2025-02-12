@@ -1,14 +1,14 @@
 const std = @import("std");
 
-const Lexer = @import("lexer.zig").Lexer;
-const Parser = @import("parser.zig").Parser;
-const token = @import("token.zig");
 const ast = @import("ast.zig");
 const evaluator = @import("evaluator.zig");
+const Lexer = @import("lexer.zig").Lexer;
 const object = @import("object.zig");
+const Parser = @import("parser.zig").Parser;
+const token = @import("token.zig");
 
-pub fn start(BufferWriter: type, buffered_writer: *BufferWriter) !void {
-    const stdout = buffered_writer.writer();
+pub fn start(buffered_writer: *std.io.BufferedWriter(4096, @TypeOf(std.io.getStdOut().writer()))) !void {
+    var stdout = buffered_writer.writer().any();
 
     var reader = std.io.getStdIn().reader();
 
@@ -37,7 +37,8 @@ pub fn start(BufferWriter: type, buffered_writer: *BufferWriter) !void {
 
         if (program.statements.len > 0) {
             const evaluated = evaluator.eval(ast.Node{ .program = program }).?;
-            try stdout.print("{s}\n", .{try evaluated.inspect(allocator)});
+            try evaluated.inspect(&stdout);
+            try stdout.print("\n", .{});
             try buffered_writer.flush();
         } else {
             for (parser.errors.items) |err| {

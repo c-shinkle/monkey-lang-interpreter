@@ -1,8 +1,9 @@
 const std = @import("std");
 const testing = std.testing;
 
+const AnyWriter = std.io.AnyWriter;
+
 const ObjectType = []const u8;
-const ObjectError = error{} || std.fmt.AllocPrintError;
 
 const INTEGER_OBJ = "INTEGER";
 const BOOLEAN_OBJ = "BOOLEAN";
@@ -13,10 +14,10 @@ pub const Object = union(enum) {
     boolean: Boolean,
     _null: Null,
 
-    pub fn inspect(self: *const Object, allocator: std.mem.Allocator) ObjectError![]const u8 {
-        return switch (self.*) {
-            inline else => |obj| obj.inspect(allocator),
-        };
+    pub fn inspect(self: *const Object, writer: *AnyWriter) AnyWriter.Error!void {
+        switch (self.*) {
+            inline else => |obj| try obj.inspect(writer),
+        }
     }
 
     pub fn _type(self: *const Object) ObjectType {
@@ -29,11 +30,12 @@ pub const Object = union(enum) {
 pub const Integer = struct {
     value: i64,
 
-    pub fn inspect(self: Integer, allocator: std.mem.Allocator) ObjectError![]const u8 {
-        return std.fmt.allocPrint(allocator, "{d}", .{self.value});
+    pub fn inspect(self: Integer, writer: *AnyWriter) AnyWriter.Error!void {
+        return try writer.print("{d}", .{self.value});
     }
 
-    pub fn _type(_: *const Integer) ObjectType {
+    pub fn _type(self: *const Integer) ObjectType {
+        _ = self; // autofix
         return INTEGER_OBJ;
     }
 };
@@ -41,21 +43,24 @@ pub const Integer = struct {
 pub const Boolean = struct {
     value: bool,
 
-    pub fn inspect(self: *const Boolean, allocator: std.mem.Allocator) ObjectError![]const u8 {
-        return std.fmt.allocPrint(allocator, "{any}", .{self.value});
+    pub fn inspect(self: *const Boolean, writer: *AnyWriter) AnyWriter.Error!void {
+        return try writer.print("{any}", .{self.value});
     }
 
-    pub fn _type(_: *const Boolean) ObjectType {
+    pub fn _type(self: *const Boolean) ObjectType {
+        _ = self; // autofix
         return BOOLEAN_OBJ;
     }
 };
 
 pub const Null = struct {
-    pub fn inspect(_: *const Null, allocator: std.mem.Allocator) ObjectError![]const u8 {
-        return std.fmt.allocPrint(allocator, "null", .{});
+    pub fn inspect(self: *const Null, writer: *AnyWriter) AnyWriter.Error!void {
+        _ = self; // autofix
+        return try writer.print("null", .{});
     }
 
-    pub fn _type(_: *const Null) ObjectType {
+    pub fn _type(self: *const Null) ObjectType {
+        _ = self; // autofix
         return NULL_OBJ;
     }
 };
@@ -67,11 +72,15 @@ test "Object inspect" {
         .{ .object = Object{ ._null = Null{} }, .expected = "null" },
     };
 
+    var array_list = std.ArrayList(u8).init(testing.allocator);
+    defer array_list.deinit();
+    var writer = array_list.writer().any();
     for (object_tests) |object_test| {
-        const actual = try object_test.object.inspect(testing.allocator);
-        defer testing.allocator.free(actual);
+        try object_test.object.inspect(&writer);
 
-        try testing.expectEqualStrings(object_test.expected, actual);
+        try testing.expectEqualStrings(object_test.expected, array_list.items);
+
+        array_list.clearRetainingCapacity();
     }
 }
 
