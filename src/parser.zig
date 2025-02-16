@@ -921,7 +921,7 @@ test "Operator Precedence" {
 
     var array_list = std.ArrayList(u8).init(testing.allocator);
     defer array_list.deinit();
-    var writer = array_list.writer().any();
+    const writer = array_list.writer().any();
     for (string_tests) |string_test| {
         var lexer = Lexer.init(string_test.input);
         var parser = try Parser.init(&lexer, testing.allocator);
@@ -930,7 +930,7 @@ test "Operator Precedence" {
         defer program.deinit();
         try checkParserErrors(&parser);
 
-        try program.string(&writer);
+        try program.string(writer);
         try testing.expectEqualStrings(string_test.expected, array_list.items);
 
         array_list.clearRetainingCapacity();

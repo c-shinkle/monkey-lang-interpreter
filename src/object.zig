@@ -14,14 +14,14 @@ pub const Object = union(enum) {
     boolean: Boolean,
     _null: Null,
 
-    pub fn inspect(self: *const Object, writer: *const AnyWriter) AnyWriter.Error!void {
-        switch (self.*) {
+    pub fn inspect(self: Object, writer: AnyWriter) AnyWriter.Error!void {
+        switch (self) {
             inline else => |obj| try obj.inspect(writer),
         }
     }
 
-    pub fn _type(self: *const Object) ObjectType {
-        return switch (self.*) {
+    pub fn _type(self: Object) ObjectType {
+        return switch (self) {
             inline else => |obj| obj._type(),
         };
     }
@@ -30,7 +30,7 @@ pub const Object = union(enum) {
 pub const Integer = struct {
     value: i64,
 
-    pub fn inspect(self: Integer, writer: *const AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Integer, writer: AnyWriter) AnyWriter.Error!void {
         return try writer.print("{d}", .{self.value});
     }
 
@@ -43,7 +43,7 @@ pub const Integer = struct {
 pub const Boolean = struct {
     value: bool,
 
-    pub fn inspect(self: *const Boolean, writer: *const AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Boolean, writer: AnyWriter) AnyWriter.Error!void {
         return try writer.print("{any}", .{self.value});
     }
 
@@ -54,7 +54,7 @@ pub const Boolean = struct {
 };
 
 pub const Null = struct {
-    pub fn inspect(self: *const Null, writer: *const AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Null, writer: AnyWriter) AnyWriter.Error!void {
         _ = self; // autofix
         return try writer.print("null", .{});
     }
@@ -74,10 +74,9 @@ test "Object inspect" {
 
     var array_list = std.ArrayList(u8).init(testing.allocator);
     defer array_list.deinit();
-    var writer = array_list.writer().any();
+    const writer = array_list.writer().any();
     for (object_tests) |object_test| {
-        try object_test.object.inspect(&writer);
-
+        try object_test.object.inspect(writer);
         try testing.expectEqualStrings(object_test.expected, array_list.items);
 
         array_list.clearRetainingCapacity();

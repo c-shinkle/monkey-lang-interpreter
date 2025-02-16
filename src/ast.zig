@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 
+const AnyWriter = std.io.AnyWriter;
+
 const token = @import("token.zig");
 
 pub const Node = union(enum) {
@@ -14,7 +16,7 @@ pub const Node = union(enum) {
         };
     }
 
-    pub fn string(self: *const Node, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const Node, writer: AnyWriter) AnyWriter.Error!void {
         switch (self.*) {
             inline else => |node| node.string(writer),
         }
@@ -40,7 +42,7 @@ pub const Program = struct {
         }
     }
 
-    pub fn string(self: *const Program, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const Program, writer: AnyWriter) AnyWriter.Error!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -65,7 +67,7 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn string(self: *const Statement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const Statement, writer: AnyWriter) AnyWriter.Error!void {
         switch (self.*) {
             inline else => |stmt| try stmt.string(writer),
         }
@@ -89,7 +91,7 @@ pub const LetStatement = struct {
 
     pub fn statementNode(_: *const LetStatement) void {}
 
-    pub fn string(self: *const LetStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const LetStatement, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
 
@@ -116,7 +118,7 @@ pub const ReturnStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ReturnStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const ReturnStatement, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self.tokenLiteral());
         try writer.writeByte(' ');
         try self.return_value.string(writer);
@@ -139,7 +141,7 @@ pub const ExpressionStatement = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const ExpressionStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const ExpressionStatement, writer: AnyWriter) AnyWriter.Error!void {
         try self.expression.string(writer);
     }
 
@@ -158,7 +160,7 @@ pub const BlockStatement = struct {
 
     pub fn statementNode(_: *const BlockStatement) void {}
 
-    pub fn string(self: *const BlockStatement, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const BlockStatement, writer: AnyWriter) AnyWriter.Error!void {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
@@ -194,7 +196,7 @@ pub const Expression = union(enum) {
         };
     }
 
-    pub fn string(self: *const Expression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const Expression, writer: AnyWriter) AnyWriter.Error!void {
         switch (self.*) {
             inline else => |exp| try exp.string(writer),
         }
@@ -217,7 +219,7 @@ pub const Identifier = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const Identifier, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const Identifier, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self.value);
     }
 
@@ -237,7 +239,7 @@ pub const IntegerLiteral = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const IntegerLiteral, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const IntegerLiteral, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self._token.literal);
     }
 
@@ -258,7 +260,7 @@ pub const PrefixExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const PrefixExpression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const PrefixExpression, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeByte('(');
         try writer.writeAll(self.operator);
         try self.right.string(writer);
@@ -283,7 +285,7 @@ pub const InfixExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const InfixExpression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const InfixExpression, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeByte('(');
         try self.left.string(writer);
         try writer.writeByte(' ');
@@ -311,7 +313,7 @@ pub const Boolean = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const Boolean, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const Boolean, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self._token.literal);
     }
 
@@ -333,7 +335,7 @@ pub const IfExpression = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const IfExpression, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const IfExpression, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll("if ");
         try self.condition.string(writer);
         try writer.writeByte(' ');
@@ -367,7 +369,7 @@ pub const FunctionLiteral = struct {
         return self._token.literal;
     }
 
-    pub fn string(self: *const FunctionLiteral, writer: *std.io.AnyWriter) std.io.AnyWriter.Error!void {
+    pub fn string(self: *const FunctionLiteral, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self.tokenLiteral());
         if (self.parameters.len > 0) {
             try self.parameters[0].string(writer);
@@ -404,8 +406,8 @@ pub const CallExpression = struct {
 
     pub fn string(
         self: *const CallExpression,
-        writer: *std.io.AnyWriter,
-    ) std.io.AnyWriter.Error!void {
+        writer: AnyWriter,
+    ) AnyWriter.Error!void {
         try self.function.string(writer);
         try writer.writeByte('(');
         if (self.arguments.len > 0) {
@@ -458,12 +460,12 @@ test "ast foo" {
 
     var string = std.ArrayList(u8).init(allocator);
     defer string.deinit();
-    var writer = string.writer().any();
+    const writer = string.writer().any();
 
     const string_tests = [_][]const u8{ "let x = 10;", "10", "return x;" };
 
     for (string_tests, 0..) |string_test, i| {
-        try program.statements[i].string(&writer);
+        try program.statements[i].string(writer);
         try testing.expectEqualStrings(string_test, string.items);
         string.clearRetainingCapacity();
     }

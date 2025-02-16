@@ -15,6 +15,7 @@ pub fn eval(node: ast.Node) ?obj.Object {
         .program => |prog| evalStatements(prog.statements),
         .statement => |stmt| switch (stmt) {
             .expression_statement => |exp_stmt| eval(ast.Node{ .expression = exp_stmt.expression }),
+            .block_statement => |blk_stmt| evalStatements(blk_stmt.statements),
             else => null,
         },
         .expression => |exp| switch (exp) {
@@ -29,6 +30,7 @@ pub fn eval(node: ast.Node) ?obj.Object {
                 const right = eval(ast.Node{ .expression = infix.right.* }) orelse return null;
                 return evalInfixOperatorExpression(infix.operator, left, right);
             },
+            .if_expression => |if_exp| evalIfExpression(if_exp),
             else => null,
         },
     };
@@ -72,8 +74,19 @@ fn evalInfixOperatorExpression(
     right: obj.Object,
 ) obj.Object {
     return switch (left) {
-        .integer => |left_int| switch (right) {
-            .integer => |right_int| evalIntegerInfixExpression(operator, left_int, right_int),
+        .integer => |l_int| switch (right) {
+            .integer => |r_int| evalIntegerInfixExpression(operator, l_int, r_int),
+            else => NULL,
+        },
+        .boolean => |left_bool| switch (right) {
+            .boolean => |right_bool| {
+                if (std.mem.eql(u8, "==", operator)) {
+                    return if (left_bool.value == right_bool.value) TRUE else FALSE;
+                } else if (std.mem.eql(u8, "!=", operator)) {
+                    return if (left_bool.value != right_bool.value) TRUE else FALSE;
+                }
+                return NULL;
+            },
             else => NULL,
         },
         else => NULL,
@@ -85,16 +98,43 @@ fn evalIntegerInfixExpression(
     left: obj.Integer,
     right: obj.Integer,
 ) obj.Object {
-    if (std.mem.eql(u8, operator, "+")) {
-        return obj.Object{ .integer = obj.Integer{ .value = left.value + right.value } };
-    } else if (std.mem.eql(u8, operator, "-")) {
-        return obj.Object{ .integer = obj.Integer{ .value = left.value - right.value } };
-    } else if (std.mem.eql(u8, operator, "*")) {
-        return obj.Object{ .integer = obj.Integer{ .value = left.value * right.value } };
-    } else if (std.mem.eql(u8, operator, "/")) {
-        return obj.Object{ .integer = obj.Integer{ .value = @divTrunc(left.value, right.value) } };
+    if (operator.len == 1) return switch (operator[0]) {
+        '+' => obj.Object{ .integer = obj.Integer{ .value = left.value + right.value } },
+        '-' => obj.Object{ .integer = obj.Integer{ .value = left.value - right.value } },
+        '*' => obj.Object{ .integer = obj.Integer{ .value = left.value * right.value } },
+        '/' => obj.Object{ .integer = obj.Integer{ .value = @divTrunc(left.value, right.value) } },
+        '<' => if (left.value < right.value) TRUE else FALSE,
+        '>' => if (left.value > right.value) TRUE else FALSE,
+        else => NULL,
+    };
+    if (std.mem.eql(u8, "==", operator)) {
+        return if (left.value == right.value) TRUE else FALSE;
+    }
+    if (std.mem.eql(u8, "!=", operator)) {
+        return if (left.value != right.value) TRUE else FALSE;
     }
     return NULL;
+}
+
+fn evalIfExpression(if_exp: ast.IfExpression) ?obj.Object {
+    const condition = eval(ast.Node{ .expression = if_exp.condition.* });
+    if (isTruthy(condition)) {
+        return eval(ast.Node{
+            .statement = ast.Statement{ .block_statement = if_exp.consequence.* },
+        });
+    } else if (if_exp.alternative) |alt| {
+        return eval(ast.Node{ .statement = ast.Statement{ .block_statement = alt.* } });
+    } else {
+        return NULL;
+    }
+}
+
+fn isTruthy(maybe_object: ?obj.Object) bool {
+    return if (maybe_object) |object| switch (object) {
+        ._null => false,
+        .boolean => |boolean| boolean.value,
+        else => true,
+    } else true;
 }
 
 // Test Suite
@@ -128,6 +168,14 @@ test "Boolean Expression" {
     const eval_tests = [_]struct { input: []const u8, expected: bool }{
         .{ .input = "true", .expected = true },
         .{ .input = "false", .expected = false },
+        .{ .input = "1 < 2", .expected = true },
+        .{ .input = "1 > 2", .expected = false },
+        .{ .input = "1 < 1", .expected = false },
+        .{ .input = "1 > 1", .expected = false },
+        .{ .input = "1 == 1", .expected = true },
+        .{ .input = "1 != 1", .expected = false },
+        .{ .input = "1 == 2", .expected = false },
+        .{ .input = "1 != 2", .expected = true },
     };
 
     for (eval_tests) |eval_test| {
@@ -144,11 +192,44 @@ test "Bang Operator" {
         .{ .input = "!!true", .expected = true },
         .{ .input = "!!false", .expected = false },
         .{ .input = "!!5", .expected = true },
+        .{ .input = "true == true", .expected = true },
+        .{ .input = "false == false", .expected = true },
+        .{ .input = "true == false", .expected = false },
+        .{ .input = "true != false", .expected = true },
+        .{ .input = "false != true", .expected = true },
+        .{ .input = "(1 < 2) == true", .expected = true },
+        .{ .input = "(1 < 2) == false", .expected = false },
+        .{ .input = "(1 > 2) == true", .expected = false },
+        .{ .input = "(1 > 2) == false", .expected = true },
     };
 
     for (eval_tests) |eval_test| {
         const evaluated = try testEval(eval_test.input);
         try testBooleanObject(evaluated.?, eval_test.expected);
+    }
+}
+
+test "If Else Expressions" {
+    const eval_tests = [_]struct { input: []const u8, expected: ?i64 }{
+        .{ .input = "if (true) { 10 }", .expected = 10 },
+        .{ .input = "if (false) { 10 }", .expected = null },
+        .{ .input = "if (1) { 10 }", .expected = 10 },
+        .{ .input = "if (1 < 2) { 10 }", .expected = 10 },
+        .{ .input = "if (1 > 2) { 10 }", .expected = null },
+        .{ .input = "if (1 > 2) { 10 } else { 20 }", .expected = 20 },
+        .{ .input = "if (1 < 2) { 10 } else { 20 }", .expected = 10 },
+    };
+
+    for (eval_tests) |eval_test| {
+        const evaluated = try testEval(eval_test.input);
+        switch (evaluated.?) {
+            .integer => {
+                try testIntegerObject(evaluated.?, eval_test.expected.?);
+            },
+            else => {
+                try testing.expectEqual(NULL, evaluated);
+            },
+        }
     }
 }
 
@@ -166,23 +247,31 @@ fn testEval(input: []const u8) !?obj.Object {
 }
 
 fn testIntegerObject(object: obj.Object, expected: i64) !void {
-    const actual = switch (object) {
-        .integer => |int| int,
+    switch (object) {
+        .integer => |int| try testing.expectEqual(expected, int.value),
         inline else => |other| {
             std.debug.print("object is not Integer. got={s}\n", .{@typeName(@TypeOf(other))});
             return error.TestExpectedEqual;
         },
-    };
-    try testing.expectEqual(expected, actual.value);
+    }
 }
 
 fn testBooleanObject(object: obj.Object, expected: bool) !void {
-    const actual = switch (object) {
-        .boolean => |boolean| boolean,
+    switch (object) {
+        .boolean => |boolean| try testing.expectEqual(expected, boolean.value),
         inline else => |other| {
             std.debug.print("object is not Boolean. got={s}\n", .{@typeName(@TypeOf(other))});
             return error.TestExpectedEqual;
         },
-    };
-    try testing.expectEqual(expected, actual.value);
+    }
+}
+
+fn testNullObject(object: obj.Object) !void {
+    switch (object) {
+        ._null => {},
+        inline else => |other| {
+            std.debug.print("object is not NULL. got={s}\n", .{@typeName(@TypeOf(other))});
+            return error.TestExpectedEqual;
+        },
+    }
 }

@@ -24,9 +24,9 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 }
 
-inline fn compile_unit_tests(
+fn compile_unit_tests(
     b: *std.Build,
-    name: []const u8,
+    comptime name: []const u8,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     test_step: *std.Build.Step,

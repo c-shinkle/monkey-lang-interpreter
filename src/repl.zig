@@ -20,7 +20,7 @@ pub fn start(stdout: AnyWriter) !void {
     const allocator = general_purpose_allocator.allocator();
 
     var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
-    var buffer_writer = stdout_buffer.writer().any();
+    const buffer_writer = stdout_buffer.writer().any();
 
     try stdout.print(">> ", .{});
     while (true) : ({
@@ -41,7 +41,7 @@ pub fn start(stdout: AnyWriter) !void {
 
         if (program.statements.len > 0) {
             if (evaluator.eval(ast.Node{ .program = program })) |evaluated| {
-                try evaluated.inspect(&buffer_writer);
+                try evaluated.inspect(buffer_writer);
             } else {
                 try buffer_writer.print("Could not eval input!", .{});
             }
