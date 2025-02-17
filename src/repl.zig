@@ -16,8 +16,8 @@ pub fn start(stdout: AnyWriter) !void {
     var stream_buffer: [size]u8 = undefined;
     var stream = std.io.fixedBufferStream(&stream_buffer);
 
-    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = general_purpose_allocator.allocator();
+    var debug_allocator = std.heap.DebugAllocator(.{}){};
+    const allocator = debug_allocator.allocator();
 
     var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
