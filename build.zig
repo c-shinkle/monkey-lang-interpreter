@@ -41,4 +41,6 @@ fn compile_unit_tests(
     b.installArtifact(unit_tests);
     const run_unit_tests = b.addRunArtifact(unit_tests);
     test_step.dependOn(&run_unit_tests.step);
+    const unit_test_step = b.step(name, std.fmt.comptimePrint("Run {s}", .{name}));
+    unit_test_step.dependOn(&run_unit_tests.step);
 }

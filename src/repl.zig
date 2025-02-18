@@ -40,7 +40,7 @@ pub fn start(stdout: AnyWriter) !void {
         defer program.deinit();
 
         if (program.statements.len > 0) {
-            if (evaluator.eval(ast.Node{ .program = program })) |evaluated| {
+            if (try evaluator.eval(ast.Node{ .program = program }, allocator)) |evaluated| {
                 try evaluated.inspect(buffer_writer);
             } else {
                 try buffer_writer.print("Could not eval input!", .{});
