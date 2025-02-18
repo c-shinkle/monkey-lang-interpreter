@@ -45,11 +45,11 @@ fn evalStatements(stmts: []const ast.Statement) ?obj.Object {
 }
 
 fn evalPrefixExpression(operator: []const u8, right: obj.Object) obj.Object {
-    if (std.mem.eql(u8, "!", operator)) {
-        return evalBangOperatorExpression(right);
-    } else if (std.mem.eql(u8, "-", operator)) {
-        return evalMinusPrefixOperatorExperssion(right);
-    }
+    if (operator.len == 1) return switch (operator[0]) {
+        '!' => evalBangOperatorExpression(right),
+        '-' => evalMinusPrefixOperatorExperssion(right),
+        else => NULL,
+    };
     return NULL;
 }
 
@@ -62,10 +62,10 @@ fn evalBangOperatorExpression(right: obj.Object) obj.Object {
 }
 
 fn evalMinusPrefixOperatorExperssion(right: obj.Object) obj.Object {
-    return switch (right) {
-        .integer => |int| obj.Object{ .integer = obj.Integer{ .value = -int.value } },
-        else => NULL,
-    };
+    if (right == .integer) {
+        return obj.Object{ .integer = obj.Integer{ .value = -right.integer.value } };
+    }
+    return NULL;
 }
 
 fn evalInfixOperatorExpression(
@@ -73,24 +73,16 @@ fn evalInfixOperatorExpression(
     left: obj.Object,
     right: obj.Object,
 ) obj.Object {
-    return switch (left) {
-        .integer => |l_int| switch (right) {
-            .integer => |r_int| evalIntegerInfixExpression(operator, l_int, r_int),
-            else => NULL,
-        },
-        .boolean => |left_bool| switch (right) {
-            .boolean => |right_bool| {
-                if (std.mem.eql(u8, "==", operator)) {
-                    return if (left_bool.value == right_bool.value) TRUE else FALSE;
-                } else if (std.mem.eql(u8, "!=", operator)) {
-                    return if (left_bool.value != right_bool.value) TRUE else FALSE;
-                }
-                return NULL;
-            },
-            else => NULL,
-        },
-        else => NULL,
-    };
+    if (left == .integer and right == .integer) {
+        return evalIntegerInfixExpression(operator, left.integer, right.integer);
+    } else if (left == .boolean and right == .boolean) {
+        if (std.mem.eql(u8, "==", operator)) {
+            return if (left.boolean.value == right.boolean.value) TRUE else FALSE;
+        } else if (std.mem.eql(u8, "!=", operator)) {
+            return if (left.boolean.value != right.boolean.value) TRUE else FALSE;
+        }
+    }
+    return NULL;
 }
 
 fn evalIntegerInfixExpression(
@@ -119,14 +111,12 @@ fn evalIntegerInfixExpression(
 fn evalIfExpression(if_exp: ast.IfExpression) ?obj.Object {
     const condition = eval(ast.Node{ .expression = if_exp.condition.* });
     if (isTruthy(condition)) {
-        return eval(ast.Node{
-            .statement = ast.Statement{ .block_statement = if_exp.consequence.* },
-        });
+        const stmt = ast.Statement{ .block_statement = if_exp.consequence.* };
+        return eval(ast.Node{ .statement = stmt });
     } else if (if_exp.alternative) |alt| {
         return eval(ast.Node{ .statement = ast.Statement{ .block_statement = alt.* } });
-    } else {
-        return NULL;
     }
+    return NULL;
 }
 
 fn isTruthy(maybe_object: ?obj.Object) bool {
@@ -160,7 +150,7 @@ test "Integer Expression" {
 
     for (eval_tests) |eval_test| {
         const evaluated = try testEval(eval_test.input);
-        try testIntegerObject(evaluated.?, eval_test.expected);
+        try testIntegerObject(eval_test.expected, evaluated.?);
     }
 }
 
@@ -180,7 +170,7 @@ test "Boolean Expression" {
 
     for (eval_tests) |eval_test| {
         const evaluated = try testEval(eval_test.input);
-        try testBooleanObject(evaluated.?, eval_test.expected);
+        try testBooleanObject(eval_test.expected, evaluated.?);
     }
 }
 
@@ -205,7 +195,7 @@ test "Bang Operator" {
 
     for (eval_tests) |eval_test| {
         const evaluated = try testEval(eval_test.input);
-        try testBooleanObject(evaluated.?, eval_test.expected);
+        try testBooleanObject(eval_test.expected, evaluated.?);
     }
 }
 
@@ -222,13 +212,10 @@ test "If Else Expressions" {
 
     for (eval_tests) |eval_test| {
         const evaluated = try testEval(eval_test.input);
-        switch (evaluated.?) {
-            .integer => {
-                try testIntegerObject(evaluated.?, eval_test.expected.?);
-            },
-            else => {
-                try testing.expectEqual(NULL, evaluated);
-            },
+        if (eval_test.expected) |expected| {
+            try testIntegerObject(expected, evaluated.?);
+        } else {
+            try testNullObject(evaluated.?);
         }
     }
 }
@@ -246,32 +233,25 @@ fn testEval(input: []const u8) !?obj.Object {
     return eval(node);
 }
 
-fn testIntegerObject(object: obj.Object, expected: i64) !void {
-    switch (object) {
-        .integer => |int| try testing.expectEqual(expected, int.value),
-        inline else => |other| {
-            std.debug.print("object is not Integer. got={s}\n", .{@typeName(@TypeOf(other))});
-            return error.TestExpectedEqual;
-        },
+fn testIntegerObject(expected: i64, object: obj.Object) !void {
+    if (object != .integer) {
+        std.debug.print("object is not Integer. got={any}\n", .{object});
+        return error.TestExpectedEqual;
     }
+    try testing.expectEqual(expected, object.integer.value);
 }
 
-fn testBooleanObject(object: obj.Object, expected: bool) !void {
-    switch (object) {
-        .boolean => |boolean| try testing.expectEqual(expected, boolean.value),
-        inline else => |other| {
-            std.debug.print("object is not Boolean. got={s}\n", .{@typeName(@TypeOf(other))});
-            return error.TestExpectedEqual;
-        },
+fn testBooleanObject(expected: bool, object: obj.Object) !void {
+    if (object != .boolean) {
+        std.debug.print("object is not Boolean. got={any}\n", .{object});
+        return error.TestExpectedEqual;
     }
+    try testing.expectEqual(expected, object.boolean.value);
 }
 
 fn testNullObject(object: obj.Object) !void {
-    switch (object) {
-        ._null => {},
-        inline else => |other| {
-            std.debug.print("object is not NULL. got={s}\n", .{@typeName(@TypeOf(other))});
-            return error.TestExpectedEqual;
-        },
+    if (object != ._null) {
+        std.debug.print("object is not NULL. got={any}\n", .{object});
+        return error.TestExpectedEqual;
     }
 }
