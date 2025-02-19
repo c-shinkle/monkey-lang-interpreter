@@ -33,23 +33,19 @@ pub fn eval(node: ast.Node, allocator: std.mem.Allocator) EvalError!?obj.Object 
             .integer_literal => |int| obj.Object{ .integer = obj.Integer{ .value = int.value } },
             .boolean_expression => |boolean| if (boolean.value) TRUE else FALSE,
             .prefix_expression => |prefix| {
-                const right = try eval(
-                    ast.Node{ .expression = prefix.right.* },
-                    allocator,
-                ) orelse return null;
+                const maybe_right = try eval(ast.Node{ .expression = prefix.right.* }, allocator);
+                const right = maybe_right orelse return null;
                 return evalPrefixExpression(prefix.operator, right);
             },
             .infix_expression => |infix| {
-                const left = (try eval(
-                    ast.Node{ .expression = infix.left.* },
-                    allocator,
-                )) orelse return null;
+                const maybe_left = try eval(ast.Node{ .expression = infix.left.* }, allocator);
+                const left = maybe_left orelse return null;
                 errdefer left.deinit(allocator);
-                const right = (try eval(
-                    ast.Node{ .expression = infix.right.* },
-                    allocator,
-                )) orelse return null;
+
+                const maybe_right = try eval(ast.Node{ .expression = infix.right.* }, allocator);
+                const right = maybe_right orelse return null;
                 // errdefer right.deinit(allocator);
+
                 return evalInfixOperatorExpression(infix.operator, left, right);
             },
             .if_expression => |if_exp| try evalIfExpression(if_exp, allocator),
@@ -93,10 +89,10 @@ fn evalBangOperatorExpression(right: obj.Object) obj.Object {
 }
 
 fn evalMinusPrefixOperatorExperssion(right: obj.Object) obj.Object {
-    if (right == .integer) {
-        return obj.Object{ .integer = obj.Integer{ .value = -right.integer.value } };
+    if (right != .integer) {
+        return NULL;
     }
-    return NULL;
+    return obj.Object{ .integer = obj.Integer{ .value = -right.integer.value } };
 }
 
 fn evalInfixOperatorExpression(
@@ -146,9 +142,8 @@ fn evalIfExpression(if_exp: ast.IfExpression, allocator: std.mem.Allocator) Eval
         const stmt = ast.Statement{ .block_statement = if_exp.consequence.* };
         return try eval(ast.Node{ .statement = stmt }, allocator);
     } else if (if_exp.alternative) |alt| {
-        return try eval(ast.Node{
-            .statement = ast.Statement{ .block_statement = alt.* },
-        }, allocator);
+        const stmt = ast.Statement{ .block_statement = alt.* };
+        return try eval(ast.Node{ .statement = stmt }, allocator);
     }
     return NULL;
 }
@@ -312,20 +307,20 @@ fn testEval(input: []const u8) !?obj.Object {
     return try eval(node, testing.allocator);
 }
 
-fn testIntegerObject(expected: i64, object: obj.Object) !void {
-    if (object != .integer) {
-        std.debug.print("object is not Integer. got={any}\n", .{object});
+fn testIntegerObject(expected: i64, actual: obj.Object) !void {
+    if (actual != .integer) {
+        std.debug.print("object is not Integer. got={any}\n", .{actual});
         return error.TestExpectedEqual;
     }
-    try testing.expectEqual(expected, object.integer.value);
+    try testing.expectEqual(expected, actual.integer.value);
 }
 
-fn testBooleanObject(expected: bool, object: obj.Object) !void {
-    if (object != .boolean) {
-        std.debug.print("object is not Boolean. got={any}\n", .{object});
+fn testBooleanObject(expected: bool, actual: obj.Object) !void {
+    if (actual != .boolean) {
+        std.debug.print("object is not Boolean. got={any}\n", .{actual});
         return error.TestExpectedEqual;
     }
-    try testing.expectEqual(expected, object.boolean.value);
+    try testing.expectEqual(expected, actual.boolean.value);
 }
 
 fn testNullObject(object: obj.Object) !void {
