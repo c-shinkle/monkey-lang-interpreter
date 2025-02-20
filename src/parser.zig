@@ -250,11 +250,13 @@ pub const Parser = struct {
 
         var left_exp = try prefix(self);
 
-        while (!self.peekTokenIs(token.SEMICOLON) and precedence_int < @intFromEnum(self.peekPrecedence())) {
+        while (!self.peekTokenIs(token.SEMICOLON) and
+            precedence_int < @intFromEnum(self.peekPrecedence()))
+        {
+            errdefer left_exp.deinit(self.allocator);
+
             const infix = self.infix_parse_fns.get(self.peek_token._type) orelse return left_exp;
-
             self.nextToken();
-
             left_exp = try infix(self, left_exp);
         }
 
@@ -563,27 +565,27 @@ pub const Parser = struct {
 test "Out of Memory, no Parser errors" {
     const inputs = [_][]const u8{
         "let x = 5;",
-        "return x;",
+        "let x = 2 + 3;",
+        "let x = (2 + 3) * 1;",
         "foobar;",
+        "return x;",
         "5;",
         "!5;",
-        "-15;",
+        "-5;",
         "!true;",
         "!false;",
         "5 + 5;",
-        "5 - 5;",
-        "5 * 5;",
-        "5 / 5;",
-        "5 > 5;",
-        "5 < 5;",
         "5 == 5;",
         "5 != 5;",
         "true == true;",
         "true != false;",
-        "false == false;",
-        "if (x < y) { x } else { y };",
+        "if (x < y) { 1 } else { (2 + 3) * 4 };",
+        "if (x < y) { (1 + 2) * 3 } else { 4 };",
         "fn(x, y) { x + y };",
-        "add(1, 2 * 3, 4 + 5);",
+        "fn(x, y) { (1 + 2) * 3 };",
+        "add(1);",
+        "add((1 + 2) * 3);",
+        "add(1, (2 + 3) * 4);",
     };
     for (inputs) |input| {
         try testing.checkAllAllocationFailures(

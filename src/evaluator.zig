@@ -175,6 +175,36 @@ fn evalBlockStatement(
 
 // Test Suite
 
+test "Out of Memory, Integer Object" {
+    const eval_tests = [_]struct { input: []const u8, expected: i64 }{
+        .{ .input = "5", .expected = 5 },
+        .{ .input = "10", .expected = 10 },
+        .{ .input = "-5", .expected = -5 },
+        .{ .input = "-10", .expected = -10 },
+        .{ .input = "5 + 5 + 5 + 5 - 10", .expected = 10 },
+        .{ .input = "2 * 2 * 2 * 2 * 2", .expected = 32 },
+        .{ .input = "-50 + 100 + -50", .expected = 0 },
+        .{ .input = "5 * 2 + 10", .expected = 20 },
+        .{ .input = "5 + 2 * 10", .expected = 25 },
+        .{ .input = "20 + 2 * -10", .expected = 0 },
+        .{ .input = "50 / 2 * 2 + 10", .expected = 60 },
+        .{ .input = "2 * (5 + 10)", .expected = 30 },
+        .{ .input = "3 * 3 * 3 + 10", .expected = 37 },
+        .{ .input = "3 * (3 * 3) + 10", .expected = 37 },
+        .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
+    };
+
+    for (eval_tests) |eval_test| {
+        const input = eval_test.input;
+        const expected = eval_test.expected;
+        try testing.checkAllAllocationFailures(
+            testing.allocator,
+            testOutOfMemoryIntegerObject,
+            .{ input, expected },
+        );
+    }
+}
+
 test "Integer Expression" {
     const eval_tests = [_]struct { input: []const u8, expected: i64 }{
         .{ .input = "5", .expected = 5 },
@@ -195,7 +225,7 @@ test "Integer Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
     }
@@ -216,7 +246,7 @@ test "Boolean Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testBooleanObject(eval_test.expected, evaluated.?);
     }
@@ -242,7 +272,7 @@ test "Bang Operator" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testBooleanObject(eval_test.expected, evaluated.?);
     }
@@ -260,7 +290,7 @@ test "If Else Expressions" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         if (eval_test.expected) |expected| {
             try testIntegerObject(expected, evaluated.?);
@@ -288,7 +318,7 @@ test "Return Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
     }
@@ -296,15 +326,15 @@ test "Return Statements" {
 
 // Test Helpers
 
-fn testEval(input: []const u8) !?obj.Object {
+fn testEval(input: []const u8, allocator: std.mem.Allocator) !?obj.Object {
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
+    var parser = try Parser.init(&lexer, allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
     defer program.deinit();
 
     const node = ast.Node{ .program = program };
-    return try eval(node, testing.allocator);
+    return try eval(node, allocator);
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
@@ -328,4 +358,14 @@ fn testNullObject(object: obj.Object) !void {
         std.debug.print("object is not NULL. got={any}\n", .{object});
         return error.TestExpectedEqual;
     }
+}
+
+fn testOutOfMemoryIntegerObject(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    expected: i64,
+) !void {
+    const actual = try testEval(input, allocator);
+    defer actual.?.deinit(allocator);
+    try testIntegerObject(expected, actual.?);
 }

@@ -104,6 +104,7 @@ pub const LetStatement = struct {
     }
 
     pub fn deinit(self: *const LetStatement, allocator: std.mem.Allocator) void {
+        self.value.deinit(allocator);
         allocator.destroy(self.name);
     }
 };
