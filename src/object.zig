@@ -9,16 +9,22 @@ pub const INTEGER_OBJ = "INTEGER";
 pub const BOOLEAN_OBJ = "BOOLEAN";
 pub const NULL_OBJ = "NULL";
 pub const RETURN_VALUE_OBJ = "RETURN_VALUE";
+pub const ERROR_OBJ = "ERROR";
 
 pub const Object = union(enum) {
     integer: Integer,
     boolean: Boolean,
     _null: Null,
     return_value: ReturnValue,
+    _error: Error,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
-            inline else => |obj| obj._type(),
+            .integer => INTEGER_OBJ,
+            .boolean => BOOLEAN_OBJ,
+            ._null => NULL_OBJ,
+            .return_value => RETURN_VALUE_OBJ,
+            ._error => ERROR_OBJ,
         };
     }
 
@@ -33,15 +39,14 @@ pub const Object = union(enum) {
             inline else => |obj| obj.deinit(allocator),
         }
     }
+
+    pub fn eql(self: Object, other: Object) bool {
+        return std.meta.activeTag(self) == std.meta.activeTag(other);
+    }
 };
 
 pub const Integer = struct {
     value: i64,
-
-    pub fn _type(self: *const Integer) ObjectType {
-        _ = self; // autofix
-        return INTEGER_OBJ;
-    }
 
     pub fn inspect(self: *const Integer, writer: AnyWriter) AnyWriter.Error!void {
         return try writer.print("{d}", .{self.value});
@@ -56,11 +61,6 @@ pub const Integer = struct {
 pub const Boolean = struct {
     value: bool,
 
-    pub fn _type(self: *const Boolean) ObjectType {
-        _ = self; // autofix
-        return BOOLEAN_OBJ;
-    }
-
     pub fn inspect(self: *const Boolean, writer: AnyWriter) AnyWriter.Error!void {
         try writer.print("{any}", .{self.value});
     }
@@ -72,10 +72,6 @@ pub const Boolean = struct {
 };
 
 pub const Null = struct {
-    pub fn _type(self: *const Null) ObjectType {
-        _ = self; // autofix
-        return NULL_OBJ;
-    }
     pub fn inspect(self: *const Null, writer: AnyWriter) AnyWriter.Error!void {
         _ = self; // autofix
         try writer.print("null", .{});
@@ -88,25 +84,36 @@ pub const Null = struct {
 };
 
 pub const ReturnValue = struct {
-    value: *?Object,
-
-    pub fn _type(self: *const ReturnValue) ObjectType {
-        _ = self; // autofix
-        return RETURN_VALUE_OBJ;
-    }
+    value: ?*Object,
 
     pub fn inspect(self: *const ReturnValue, writer: AnyWriter) AnyWriter.Error!void {
-        if (self.value.*) |v| try v.inspect(writer) else try writer.print("null", .{});
+        if (self.value) |value| try value.inspect(writer) else try writer.print("null", .{});
     }
 
     pub fn deinit(self: *const ReturnValue, allocator: std.mem.Allocator) void {
-        if (self.value.*) |value| value.deinit(allocator);
-        allocator.destroy(self.value);
+        if (self.value) |value| {
+            value.deinit(allocator);
+            allocator.destroy(value);
+        }
     }
 };
 
+pub const Error = struct {
+    message: []const u8,
+
+    pub fn inspect(self: *const Error, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.print("ERROR: {s}", .{self.message});
+    }
+
+    pub fn deinit(self: *const Error, allocator: std.mem.Allocator) void {
+        allocator.free(self.message);
+    }
+};
+
+// Test Suite
+
 test "Object inspect" {
-    var alloc_object: ?Object = Object{ ._null = Null{} };
+    var alloc_object = Object{ ._null = Null{} };
     const object_tests = [_]struct { object: Object, expected: []const u8 }{
         .{ .object = Object{ .integer = Integer{ .value = 1 } }, .expected = "1" },
         .{ .object = Object{ .boolean = Boolean{ .value = true } }, .expected = "true" },
@@ -128,7 +135,7 @@ test "Object inspect" {
 }
 
 test "Object type" {
-    var alloc_object: ?Object = Object{ ._null = Null{} };
+    var alloc_object = Object{ ._null = Null{} };
     const object_tests = [_]struct { object: Object, expected: ObjectType }{
         .{ .object = Object{ .integer = Integer{ .value = 1 } }, .expected = INTEGER_OBJ },
         .{ .object = Object{ .boolean = Boolean{ .value = true } }, .expected = BOOLEAN_OBJ },
