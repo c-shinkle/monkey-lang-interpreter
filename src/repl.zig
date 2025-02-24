@@ -8,11 +8,12 @@ const Lexer = @import("lexer.zig").Lexer;
 const object = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
+const Environment = @import("environment.zig").Environment;
 
 pub fn start(stdout: AnyWriter) !void {
     var stdin_reader = std.io.getStdIn().reader();
 
-    const size = 4096;
+    const size: usize = 4096;
     var stream_buffer: [size]u8 = undefined;
     var stream = std.io.fixedBufferStream(&stream_buffer);
 
@@ -22,9 +23,12 @@ pub fn start(stdout: AnyWriter) !void {
     var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
 
+    var env = Environment.init();
+    defer env.deinit(allocator);
+
     try stdout.print(">> ", .{});
     while (true) : ({
-        try buffer_writer.print("\n>> ", .{});
+        try buffer_writer.print(">> ", .{});
         try stdout_buffer.flush();
         stream.reset();
     }) {
@@ -40,10 +44,9 @@ pub fn start(stdout: AnyWriter) !void {
         defer program.deinit();
 
         if (program.statements.len > 0) {
-            if (try evaluator.eval(ast.Node{ .program = program }, allocator)) |evaluated| {
+            if (try evaluator.eval(allocator, ast.Node{ .program = program }, &env)) |evaluated| {
                 try evaluated.inspect(buffer_writer);
-            } else {
-                try buffer_writer.print("Could not eval input!", .{});
+                try buffer_writer.writeByte('\n');
             }
         } else {
             for (parser.errors.items) |err| {
