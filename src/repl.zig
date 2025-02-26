@@ -29,12 +29,9 @@ pub fn start(stdout: AnyWriter) !void {
         try stdout_buffer.flush();
         stream.reset();
     }) {
-        stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size) catch |e| {
-            if (e == error.EndOfStream) {
-                try stdout.writeByte('\n');
-                return;
-            }
-            return e;
+        stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size) catch |e| return switch (e) {
+            error.EndOfStream => stdout.writeByte('\n'),
+            else => e,
         };
         if (std.mem.eql(u8, stream.getWritten(), "exit")) {
             return;
