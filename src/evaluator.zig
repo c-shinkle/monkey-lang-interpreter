@@ -23,7 +23,7 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
                 if (is_error(maybe)) return maybe;
 
                 const let_value = maybe orelse return null;
-                _ = try env.set(alloc, let_stmt.name.value, let_value);
+                _ = try env.set(let_stmt.name.value, let_value);
                 return null;
             },
             .expression_statement => |exp_stmt| try eval(
@@ -239,18 +239,17 @@ fn evalBlockStatement(
     block: ast.BlockStatement,
     env: *Environment,
 ) EvalError!?obj.Object {
-    var maybe_result: ?obj.Object = null;
+    var maybe: ?obj.Object = null;
 
     for (block.statements) |stmt| {
-        maybe_result = try eval(alloc, ast.Node{ .statement = stmt }, env);
-        if (maybe_result) |result| {
-            if (result == .return_value or result == ._error) {
-                return result;
-            }
-        }
+        maybe = try eval(alloc, ast.Node{ .statement = stmt }, env);
+        if (maybe) |result| switch (result) {
+            .return_value, ._error => return result,
+            else => {},
+        };
     }
 
-    return maybe_result;
+    return maybe;
 }
 
 fn new_error(
@@ -268,11 +267,11 @@ fn is_error(maybe_object: ?obj.Object) bool {
 
 fn eval_identifier(
     alloc: Allocator,
-    node: *const ast.Identifier,
+    ident: *const ast.Identifier,
     env: *Environment,
 ) EvalError!obj.Object {
-    const maybe = env.get(node.value);
-    return maybe orelse new_error(alloc, "identifier not found: {s}", .{node.value});
+    const maybe = env.get(ident.value);
+    return maybe orelse new_error(alloc, "identifier not found: {s}", .{ident.value});
 }
 
 // Test Suite
@@ -517,8 +516,8 @@ fn testEval(input: []const u8, allocator: Allocator) !?obj.Object {
     defer parser.deinit();
     const program = try parser.parseProgram();
     defer program.deinit();
-    var env = Environment.init();
-    defer env.deinit(allocator);
+    var env = Environment.init(allocator);
+    defer env.deinit();
 
     const node = ast.Node{ .program = program };
     return try eval(allocator, node, &env);

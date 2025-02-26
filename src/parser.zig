@@ -171,9 +171,7 @@ pub const Parser = struct {
             return ParserError.MissingLetIdentifier;
         }
 
-        const name = try self.allocator.create(ast.Identifier);
-        errdefer self.allocator.destroy(name);
-        name.* = ast.Identifier{
+        const name = ast.Identifier{
             ._token = self.cur_token,
             .value = self.cur_token.literal,
         };

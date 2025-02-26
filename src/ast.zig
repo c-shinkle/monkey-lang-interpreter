@@ -82,7 +82,7 @@ pub const Statement = union(enum) {
 
 pub const LetStatement = struct {
     _token: token.Token,
-    name: *const Identifier,
+    name: Identifier,
     value: Expression,
 
     pub fn tokenLiteral(self: *const LetStatement) []const u8 {
@@ -105,7 +105,6 @@ pub const LetStatement = struct {
 
     pub fn deinit(self: *const LetStatement, allocator: std.mem.Allocator) void {
         self.value.deinit(allocator);
-        allocator.destroy(self.name);
     }
 };
 
@@ -432,25 +431,42 @@ pub const CallExpression = struct {
 };
 
 test "ast foo" {
-    var allocator = testing.allocator;
-    const name = try allocator.create(Identifier);
-    name.* = Identifier{ ._token = token.Token{ ._type = token.IDENT, .literal = "x" }, .value = "x" };
+    const allocator = testing.allocator;
+    const name = Identifier{
+        ._token = token.Token{ ._type = token.IDENT, .literal = "x" },
+        .value = "x",
+    };
 
     var statements = std.ArrayList(Statement).init(allocator);
     try statements.append(Statement{ .let_statement = LetStatement{
         ._token = token.Token{ ._type = token.LET, .literal = "let" },
         .name = name,
-        .value = Expression{ .identifier = Identifier{ ._token = token.Token{ ._type = token.INT, .literal = "10" }, .value = "10" } },
+        .value = Expression{
+            .identifier = Identifier{
+                ._token = token.Token{ ._type = token.INT, .literal = "10" },
+                .value = "10",
+            },
+        },
     } });
 
     try statements.append(Statement{ .expression_statement = ExpressionStatement{
         ._token = token.Token{ ._type = token.IDENT, .literal = "x" },
-        .expression = Expression{ .identifier = Identifier{ ._token = token.Token{ ._type = token.IDENT, .literal = "10" }, .value = "10" } },
+        .expression = Expression{
+            .identifier = Identifier{
+                ._token = token.Token{ ._type = token.IDENT, .literal = "10" },
+                .value = "10",
+            },
+        },
     } });
 
     try statements.append(Statement{ .return_statement = ReturnStatement{
         ._token = token.Token{ ._type = token.RETURN, .literal = "return" },
-        .return_value = Expression{ .identifier = Identifier{ ._token = token.Token{ ._type = token.IDENT, .literal = "x" }, .value = "x" } },
+        .return_value = Expression{
+            .identifier = Identifier{
+                ._token = token.Token{ ._type = token.IDENT, .literal = "x" },
+                .value = "x",
+            },
+        },
     } });
 
     const program = Program{

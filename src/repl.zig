@@ -17,14 +17,11 @@ pub fn start(stdout: AnyWriter) !void {
     var stream_buffer: [size]u8 = undefined;
     var stream = std.io.fixedBufferStream(&stream_buffer);
 
-    var debug_allocator = std.heap.DebugAllocator(.{}){};
-    const allocator = debug_allocator.allocator();
-
     var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
 
-    var env = Environment.init();
-    defer env.deinit(allocator);
+    var env = Environment.init(std.heap.c_allocator);
+    defer env.deinit();
 
     try stdout.print(">> ", .{});
     while (true) : ({
@@ -32,19 +29,27 @@ pub fn start(stdout: AnyWriter) !void {
         try stdout_buffer.flush();
         stream.reset();
     }) {
-        try stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size);
+        stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size) catch |e| {
+            if (e == error.EndOfStream) {
+                try stdout.writeByte('\n');
+                return;
+            }
+            return e;
+        };
         if (std.mem.eql(u8, stream.getWritten(), "exit")) {
             return;
         }
-
         var lexer = Lexer.init(stream.getWritten());
-        var parser = try Parser.init(&lexer, allocator);
-        defer parser.deinit();
-        const program = try parser.parseProgram();
-        defer program.deinit();
 
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+
+        var parser = try Parser.init(&lexer, alloc);
+        const program = try parser.parseProgram();
         if (program.statements.len > 0) {
-            if (try evaluator.eval(allocator, ast.Node{ .program = program }, &env)) |evaluated| {
+            const maybe = try evaluator.eval(alloc, ast.Node{ .program = program }, &env);
+            if (maybe) |evaluated| {
                 try evaluated.inspect(buffer_writer);
                 try buffer_writer.writeByte('\n');
             }

@@ -3,33 +3,34 @@ const Allocator = std.mem.Allocator;
 
 const obj = @import("object.zig");
 
-const Value = obj.Object;
-
 pub const Environment = struct {
-    store: std.StringHashMapUnmanaged(Value),
+    alloc: Allocator,
+    store: std.StringHashMapUnmanaged(obj.Object),
 
-    pub fn init() Environment {
-        const store: std.StringHashMapUnmanaged(Value) = std.StringHashMapUnmanaged(Value).empty;
-        return Environment{ .store = store };
+    pub fn init(alloc: Allocator) Environment {
+        return Environment{
+            .alloc = alloc,
+            .store = std.StringHashMapUnmanaged(obj.Object).empty,
+        };
     }
 
-    pub fn deinit(self: *Environment, allocator: Allocator) void {
+    pub fn deinit(self: *Environment) void {
         var iter = self.store.iterator();
         while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.deinit(allocator);
+            self.alloc.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(self.alloc);
         }
-        self.store.deinit(allocator);
+        self.store.deinit(self.alloc);
     }
 
-    pub fn get(self: *const Environment, name: []const u8) ?Value {
+    pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
         return self.store.get(name);
     }
 
-    pub fn set(self: *Environment, allocator: Allocator, name: []const u8, val: Value) !Value {
-        const key = try allocator.dupe(u8, name);
-        errdefer allocator.free(key);
-        try self.store.put(allocator, key, val);
-        return val;
+    pub fn set(self: *Environment, name: []const u8, value: obj.Object) !obj.Object {
+        const key = try self.alloc.dupe(u8, name);
+        errdefer self.alloc.free(key);
+        try self.store.put(self.alloc, key, value);
+        return value;
     }
 };
