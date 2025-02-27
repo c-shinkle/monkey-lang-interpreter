@@ -132,7 +132,8 @@ pub const Parser = struct {
                 => {},
                 ParserError.InvalidCharacter, ParserError.Overflow => {
                     const fmt = "could not parse {s} as integer";
-                    const msg = try std.fmt.allocPrint(self.allocator, fmt, .{self.cur_token.literal});
+                    const args = .{self.cur_token.literal};
+                    const msg = try std.fmt.allocPrint(self.allocator, fmt, args);
                     errdefer self.allocator.free(msg);
                     try self.errors.append(msg);
                 },
@@ -228,7 +229,9 @@ pub const Parser = struct {
         }
         self.nextToken();
 
-        while (!self.curTokenIs(token.RBRACE) and !self.curTokenIs(token.EOF)) : (self.nextToken()) {
+        while (!self.curTokenIs(token.RBRACE) and
+            !self.curTokenIs(token.EOF)) : (self.nextToken())
+        {
             const statement = try self.parseStatement();
             errdefer statement.deinit(self.allocator);
             try statements.append(statement);
@@ -262,8 +265,12 @@ pub const Parser = struct {
     }
 
     fn parseIdentifier(self: *const Parser) ParserError!ast.Expression {
-        const identifier = ast.Identifier{ ._token = self.cur_token, .value = self.cur_token.literal };
-        return ast.Expression{ .identifier = identifier };
+        return ast.Expression{
+            .identifier = ast.Identifier{
+                ._token = self.cur_token,
+                .value = self.cur_token.literal,
+            },
+        };
     }
 
     fn parseIntegerLiteral(self: *Parser) ParserError!ast.Expression {
@@ -608,7 +615,11 @@ test "Out of Memory, with Parser errors" {
         "expected next token to be IDENT, got INT instead",
     };
 
-    try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemoryWithParserErrors, .{ input, &expecteds });
+    try testing.checkAllAllocationFailures(
+        testing.allocator,
+        testOutOfMemoryWithParserErrors,
+        .{ input, &expecteds },
+    );
 }
 
 test "Let Statement" {
@@ -1185,7 +1196,11 @@ fn testOutOfMemory(allocator: std.mem.Allocator, input: []const u8) !void {
     defer program.deinit();
 }
 
-fn testOutOfMemoryWithParserErrors(allocator: std.mem.Allocator, input: []const u8, expecteds: []const []const u8) !void {
+fn testOutOfMemoryWithParserErrors(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    expecteds: []const []const u8,
+) !void {
     var lexer = Lexer.init(input);
     var parser = try Parser.init(&lexer, allocator);
     defer parser.deinit();
@@ -1241,7 +1256,11 @@ fn testIntegerLiteral(il: ast.Expression, value: i64) !void {
     };
 
     try testing.expectEqual(value, integ.value);
-    const integer_literal = std.fmt.allocPrint(testing.allocator, "{d}", .{value}) catch return error.TestExpectedEqual;
+    const integer_literal = std.fmt.allocPrint(
+        testing.allocator,
+        "{d}",
+        .{value},
+    ) catch return error.TestExpectedEqual;
     defer testing.allocator.free(integer_literal);
     try testing.expectEqualStrings(integer_literal, integ.tokenLiteral());
 }
@@ -1275,7 +1294,12 @@ fn testLiteralExpression(exp: ast.Expression, value: anytype) !void {
     }
 }
 
-fn testInfixExpression(exp: ast.Expression, left: anytype, operator: []const u8, right: anytype) !void {
+fn testInfixExpression(
+    exp: ast.Expression,
+    left: anytype,
+    operator: []const u8,
+    right: anytype,
+) !void {
     const op_exp: ast.InfixExpression = switch (exp) {
         .infix_expression => |infix| infix,
         else => |e| {
