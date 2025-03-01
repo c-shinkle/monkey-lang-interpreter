@@ -393,19 +393,12 @@ pub const Parser = struct {
             return ParserError.MissingLeftParenthesis;
         }
         const parameters = try self.parseFunctionParameters();
-        errdefer {
-            for (parameters) |param| {
-                param.deinit(self.allocator);
-                self.allocator.destroy(param);
-            }
-            self.allocator.free(parameters);
-        }
+        errdefer self.allocator.free(parameters);
+
         if (!self.expectPeek(token.LBRACE)) {
             return error.MissingLeftBrace;
         }
-        const body = try self.allocator.create(ast.BlockStatement);
-        errdefer self.allocator.destroy(body);
-        body.* = try self.parseBlockStatement();
+        const body = try self.parseBlockStatement();
 
         return ast.Expression{
             .function_literal = ast.FunctionLiteral{
@@ -416,14 +409,9 @@ pub const Parser = struct {
         };
     }
 
-    fn parseFunctionParameters(self: *Parser) ParserError![]const *ast.Identifier {
-        var identifiers = std.ArrayList(*ast.Identifier).init(self.allocator);
-        errdefer {
-            for (identifiers.items) |ident| {
-                self.allocator.destroy(ident);
-            }
-            identifiers.deinit();
-        }
+    fn parseFunctionParameters(self: *Parser) ParserError![]ast.Identifier {
+        var identifiers = std.ArrayList(ast.Identifier).init(self.allocator);
+        errdefer identifiers.deinit();
 
         if (self.peekTokenIs(token.RPAREN)) {
             self.nextToken();
@@ -432,27 +420,18 @@ pub const Parser = struct {
 
         self.nextToken();
 
-        const first_temp = try self.allocator.create(ast.Identifier);
-        first_temp.* = ast.Identifier{
+        try identifiers.append(ast.Identifier{
             ._token = self.cur_token,
             .value = self.cur_token.literal,
-        };
-
-        identifiers.append(first_temp) catch |append_error| {
-            self.allocator.destroy(first_temp);
-            return append_error;
-        };
+        });
 
         while (self.peekTokenIs(token.COMMA)) {
             self.nextToken();
             self.nextToken();
-            const loop_temp = try self.allocator.create(ast.Identifier);
-            errdefer self.allocator.destroy(loop_temp);
-            loop_temp.* = ast.Identifier{
+            try identifiers.append(ast.Identifier{
                 ._token = self.cur_token,
                 .value = self.cur_token.literal,
-            };
-            try identifiers.append(loop_temp);
+            });
         }
 
         if (!self.expectPeek(token.RPAREN)) {
@@ -1091,8 +1070,8 @@ test "Function Literal Expression" {
 
     try testing.expectEqual(2, fn_lit.parameters.len);
 
-    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[0].* }, "x");
-    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[1].* }, "y");
+    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[0] }, "x");
+    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[1] }, "y");
 
     try testing.expectEqual(1, fn_lit.body.statements.len);
 
@@ -1143,7 +1122,7 @@ test "Function Parameter Parsing" {
         };
         try testing.expectEqual(param_test.expected_params.len, function.parameters.len);
         for (param_test.expected_params, 0..) |param, i| {
-            const exp = ast.Expression{ .identifier = function.parameters[i].* };
+            const exp = ast.Expression{ .identifier = function.parameters[i] };
             try testLiteralExpression(exp, param);
         }
     }

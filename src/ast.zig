@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-
+const Allocator = std.mem.Allocator;
 const AnyWriter = std.io.AnyWriter;
 
 const token = @import("token.zig");
@@ -24,7 +24,7 @@ pub const Node = union(enum) {
 };
 
 pub const Program = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     statements: []const Statement,
 
     pub fn deinit(self: *const Program) void {
@@ -73,10 +73,16 @@ pub const Statement = union(enum) {
         }
     }
 
-    pub fn deinit(self: Statement, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: Statement, allocator: Allocator) void {
         switch (self) {
             inline else => |stmt| stmt.deinit(allocator),
         }
+    }
+
+    pub fn dupe(self: Statement, alloc: Allocator) Allocator.Error!Statement {
+        return switch (self) {
+            inline else => |stmt| try stmt.dupe(alloc),
+        };
     }
 };
 
@@ -103,8 +109,22 @@ pub const LetStatement = struct {
         try writer.writeByte(';');
     }
 
-    pub fn deinit(self: *const LetStatement, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const LetStatement, allocator: Allocator) void {
         self.value.deinit(allocator);
+    }
+
+    pub fn dupe(self: LetStatement, alloc: Allocator) !Statement {
+        const duped_token = try self._token.dupe(alloc);
+        const duped_name = try self.name.dupe(alloc);
+        std.debug.assert(duped_name == .identifier);
+        const duped_value = try self.value.dupe(alloc);
+        return Statement{
+            .let_statement = LetStatement{
+                ._token = duped_token,
+                .name = duped_name.identifier,
+                .value = duped_value,
+            },
+        };
     }
 };
 
@@ -126,8 +146,19 @@ pub const ReturnStatement = struct {
         try writer.writeByte(';');
     }
 
-    pub fn deinit(self: *const ReturnStatement, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const ReturnStatement, allocator: Allocator) void {
         self.return_value.deinit(allocator);
+    }
+
+    pub fn dupe(self: ReturnStatement, alloc: Allocator) !Statement {
+        const duped_token = try self._token.dupe(alloc);
+        const duped_return_value = try self.return_value.dupe(alloc);
+        return Statement{
+            .return_statement = ReturnStatement{
+                ._token = duped_token,
+                .return_value = duped_return_value,
+            },
+        };
     }
 };
 
@@ -145,8 +176,19 @@ pub const ExpressionStatement = struct {
         try self.expression.string(writer);
     }
 
-    pub fn deinit(self: *const ExpressionStatement, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const ExpressionStatement, allocator: Allocator) void {
         self.expression.deinit(allocator);
+    }
+
+    pub fn dupe(self: ExpressionStatement, alloc: Allocator) !Statement {
+        const duped_token = try self._token.dupe(alloc);
+        const duped_expression = try self.expression.dupe(alloc);
+        return Statement{
+            .expression_statement = ExpressionStatement{
+                ._token = duped_token,
+                .expression = duped_expression,
+            },
+        };
     }
 };
 
@@ -166,11 +208,28 @@ pub const BlockStatement = struct {
         }
     }
 
-    pub fn deinit(self: *const BlockStatement, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const BlockStatement, allocator: Allocator) void {
         for (self.statements) |stmt| {
             stmt.deinit(allocator);
         }
         allocator.free(self.statements);
+    }
+
+    pub fn dupe(self: BlockStatement, alloc: Allocator) !Statement {
+        const duped_token = try self._token.dupe(alloc);
+        var duped_array_list = std.ArrayList(Statement).init(alloc);
+
+        for (self.statements) |stmt| {
+            const duped_stmt = try stmt.dupe(alloc);
+            try duped_array_list.append(duped_stmt);
+        }
+
+        return Statement{
+            .block_statement = BlockStatement{
+                ._token = duped_token,
+                .statements = try duped_array_list.toOwnedSlice(),
+            },
+        };
     }
 };
 
@@ -202,10 +261,16 @@ pub const Expression = union(enum) {
         }
     }
 
-    pub fn deinit(self: Expression, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: Expression, allocator: Allocator) void {
         switch (self) {
             inline else => |exp| exp.deinit(allocator),
         }
+    }
+
+    pub fn dupe(self: Expression, alloc: Allocator) Allocator.Error!Expression {
+        return switch (self) {
+            inline else => |exp| try exp.dupe(alloc),
+        };
     }
 };
 
@@ -223,9 +288,22 @@ pub const Identifier = struct {
         try writer.writeAll(self.value);
     }
 
-    pub fn deinit(self: *const Identifier, allocator: std.mem.Allocator) void {
+    // TODO How do I know if I'm a parser-allocated Identifier or a evaluator-allocated one?
+    // TODO Do I need to add a flag to enable extra deinits?
+    pub fn deinit(self: *const Identifier, allocator: Allocator) void {
         _ = self; // autofix
         _ = allocator; // autofix
+    }
+
+    pub fn dupe(self: *const Identifier, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        const duped_literal = try alloc.dupe(u8, self.value);
+        return Expression{
+            .identifier = Identifier{
+                ._token = duped_token,
+                .value = duped_literal,
+            },
+        };
     }
 };
 
@@ -243,9 +321,19 @@ pub const IntegerLiteral = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn deinit(self: *const IntegerLiteral, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const IntegerLiteral, allocator: Allocator) void {
         _ = self; // autofix
         _ = allocator; // autofix
+    }
+
+    pub fn dupe(self: IntegerLiteral, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        return Expression{
+            .integer_literal = IntegerLiteral{
+                ._token = duped_token,
+                .value = self.value,
+            },
+        };
     }
 };
 
@@ -267,9 +355,26 @@ pub const PrefixExpression = struct {
         try writer.writeByte(')');
     }
 
-    pub fn deinit(self: *const PrefixExpression, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const PrefixExpression, allocator: Allocator) void {
         self.right.deinit(allocator);
         allocator.destroy(self.right);
+    }
+
+    pub fn dupe(self: PrefixExpression, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        const duped_operator = try alloc.dupe(u8, self.operator);
+
+        const duped_right = try self.right.dupe(alloc);
+        const duped_right_ptr = try alloc.create(Expression);
+        duped_right_ptr.* = duped_right;
+
+        return Expression{
+            .prefix_expression = PrefixExpression{
+                ._token = duped_token,
+                .operator = duped_operator,
+                .right = duped_right_ptr,
+            },
+        };
     }
 };
 
@@ -295,11 +400,34 @@ pub const InfixExpression = struct {
         try writer.writeByte(')');
     }
 
-    pub fn deinit(self: *const InfixExpression, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const InfixExpression, allocator: Allocator) void {
         self.right.deinit(allocator);
         allocator.destroy(self.right);
         self.left.deinit(allocator);
         allocator.destroy(self.left);
+    }
+
+    pub fn dupe(self: InfixExpression, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+
+        const duped_left = try self.left.dupe(alloc);
+        const duped_left_ptr = try alloc.create(Expression);
+        duped_left_ptr.* = duped_left;
+
+        const duped_operator = try alloc.dupe(u8, self.operator);
+
+        const duped_right = try self.right.dupe(alloc);
+        const duped_right_ptr = try alloc.create(Expression);
+        duped_right_ptr.* = duped_right;
+
+        return Expression{
+            .infix_expression = InfixExpression{
+                ._token = duped_token,
+                .left = duped_left_ptr,
+                .operator = duped_operator,
+                .right = duped_right_ptr,
+            },
+        };
     }
 };
 
@@ -317,9 +445,19 @@ pub const Boolean = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn deinit(self: *const Boolean, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const Boolean, allocator: Allocator) void {
         _ = self; // autofix
         _ = allocator; // autofix
+    }
+
+    pub fn dupe(self: Boolean, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        return Expression{
+            .boolean_expression = Boolean{
+                ._token = duped_token,
+                .value = self.value,
+            },
+        };
     }
 };
 
@@ -346,7 +484,7 @@ pub const IfExpression = struct {
         }
     }
 
-    pub fn deinit(self: *const IfExpression, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const IfExpression, allocator: Allocator) void {
         if (self.alternative) |alt| {
             alt.deinit(allocator);
             allocator.destroy(alt);
@@ -356,12 +494,42 @@ pub const IfExpression = struct {
         self.condition.deinit(allocator);
         allocator.destroy(self.condition);
     }
+
+    pub fn dupe(self: IfExpression, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+
+        const duped_condition = try self.condition.dupe(alloc);
+        const duped_condition_ptr = try alloc.create(Expression);
+        duped_condition_ptr.* = duped_condition;
+
+        const duped_consequence = try self.consequence.dupe(alloc);
+        const duped_consequence_ptr = try alloc.create(BlockStatement);
+        std.debug.assert(duped_consequence == .block_statement);
+        duped_consequence_ptr.* = duped_consequence.block_statement;
+
+        var duped_alternative_ptr: ?*BlockStatement = null;
+        if (self.alternative) |alt| {
+            const duped_alt = try alt.dupe(alloc);
+            duped_alternative_ptr = try alloc.create(BlockStatement);
+            std.debug.assert(duped_alt == .block_statement);
+            duped_alternative_ptr.?.* = duped_alt.block_statement;
+        }
+
+        return Expression{
+            .if_expression = IfExpression{
+                ._token = duped_token,
+                .condition = duped_condition_ptr,
+                .consequence = duped_consequence_ptr,
+                .alternative = duped_alternative_ptr,
+            },
+        };
+    }
 };
 
 pub const FunctionLiteral = struct {
     _token: token.Token,
-    parameters: []const *Identifier,
-    body: *BlockStatement,
+    parameters: []Identifier,
+    body: BlockStatement,
 
     pub fn expressionNode(_: *const FunctionLiteral) void {}
 
@@ -382,14 +550,29 @@ pub const FunctionLiteral = struct {
         try self.body.string(writer);
     }
 
-    pub fn deinit(self: *const FunctionLiteral, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const FunctionLiteral, allocator: Allocator) void {
         self.body.deinit(allocator);
-        allocator.destroy(self.body);
-
-        for (self.parameters) |param| {
-            allocator.destroy(param);
-        }
         allocator.free(self.parameters);
+    }
+
+    pub fn dupe(self: FunctionLiteral, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        var duped_parameters = std.ArrayList(Identifier).init(alloc);
+        for (self.parameters) |param| {
+            const duped_param = try param.dupe(alloc);
+            std.debug.assert(duped_param == .identifier);
+            try duped_parameters.append(duped_param.identifier);
+        }
+        const duped_body = try self.body.dupe(alloc);
+        std.debug.assert(duped_body == .block_statement);
+
+        return Expression{
+            .function_literal = FunctionLiteral{
+                ._token = duped_token,
+                .parameters = try duped_parameters.toOwnedSlice(),
+                .body = duped_body.block_statement,
+            },
+        };
     }
 };
 
@@ -420,13 +603,37 @@ pub const CallExpression = struct {
         try writer.writeByte(')');
     }
 
-    pub fn deinit(self: *const CallExpression, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const CallExpression, allocator: Allocator) void {
         for (self.arguments) |arg| {
             arg.deinit(allocator);
             allocator.destroy(arg);
         }
         allocator.free(self.arguments);
         allocator.destroy(self.function);
+    }
+
+    pub fn dupe(self: CallExpression, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+
+        const duped_function = try self.function.dupe(alloc);
+        const duped_function_ptr = try alloc.create(Expression);
+        duped_function_ptr.* = duped_function;
+
+        var duped_arguments = std.ArrayList(*Expression).init(alloc);
+        for (self.arguments) |arg| {
+            const duped_arg = try arg.dupe(alloc);
+            const duped_arg_ptr = try alloc.create(Expression);
+            duped_arg_ptr.* = duped_arg;
+            try duped_arguments.append(duped_arg_ptr);
+        }
+
+        return Expression{
+            .call_expression = CallExpression{
+                ._token = duped_token,
+                .function = duped_function_ptr,
+                .arguments = try duped_arguments.toOwnedSlice(),
+            },
+        };
     }
 };
 

@@ -7,6 +7,7 @@ const Lexer = @import("lexer.zig").Lexer;
 const obj = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
 const Environment = @import("environment.zig").Environment;
+const Token = @import("token.zig").Token;
 
 const EvalError = Allocator.Error || std.fmt.AllocPrintError;
 
@@ -88,6 +89,13 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
             },
             .boolean_expression => |boolean| if (boolean.value) TRUE else FALSE,
             .if_expression => |if_exp| try evalIfExpression(alloc, if_exp, env),
+            .function_literal => |fn_lit| obj.Object{
+                ._function = obj.Function{
+                    .parameters = fn_lit.parameters,
+                    .body = fn_lit.body,
+                    .env = env,
+                },
+            },
             else => null,
         },
     };
@@ -301,6 +309,7 @@ test "Out of Memory" {
         \\
         \\  return 1;
         \\}
+        \\let a = 5; let b = a; b;
         ,
     };
 
@@ -333,7 +342,7 @@ test "Integer Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
+        const evaluated = try testEval(eval_test.input, testing.allocator, null);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
     }
@@ -363,7 +372,7 @@ test "Boolean Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
+        const evaluated = try testEval(eval_test.input, testing.allocator, null);
         defer evaluated.?.deinit(testing.allocator);
         try testBooleanObject(eval_test.expected, evaluated.?);
     }
@@ -380,7 +389,7 @@ test "Bang Operator" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
+        const evaluated = try testEval(eval_test.input, testing.allocator, null);
         defer evaluated.?.deinit(testing.allocator);
         try testBooleanObject(eval_test.expected, evaluated.?);
     }
@@ -398,7 +407,7 @@ test "If Else Expressions" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
+        const evaluated = try testEval(eval_test.input, testing.allocator, null);
         defer evaluated.?.deinit(testing.allocator);
         if (eval_test.expected) |expected| {
             try testIntegerObject(expected, evaluated.?);
@@ -426,7 +435,7 @@ test "Return Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
+        const evaluated = try testEval(eval_test.input, testing.allocator, null);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
     }
@@ -481,7 +490,7 @@ test "Error Handling" {
     };
 
     for (eval_tests) |eval_test| {
-        const maybe = try testEval(eval_test.input, testing.allocator);
+        const maybe = try testEval(eval_test.input, testing.allocator, null);
         const evaluated = maybe orelse return error.TestExpectedEqual;
         defer evaluated.deinit(testing.allocator);
 
@@ -503,24 +512,52 @@ test "Let Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        const actual = try testEval(eval_test.input, testing.allocator);
+        const actual = try testEval(eval_test.input, testing.allocator, null);
         try testIntegerObject(eval_test.expected, actual.?);
     }
 }
 
+test "Function Object" {
+    const input = "fn(x) { x + 2 };";
+    var env = Environment.init(testing.allocator);
+    defer env.deinit();
+
+    const evaluated = try testEval(input, testing.allocator, &env);
+    if (evaluated.? != ._function) {
+        std.debug.print("object is not Function. got={?any}\n", .{evaluated});
+        return error.TestExpectedEqual;
+    }
+
+    const func = evaluated.?._function;
+    try testing.expectEqual(1, func.parameters.len);
+
+    var array_list = std.ArrayList(u8).init(testing.allocator);
+    defer array_list.deinit();
+    const writer = array_list.writer().any();
+
+    try func.parameters[0].string(writer);
+    try testing.expectEqualStrings("x", array_list.items);
+    array_list.clearRetainingCapacity();
+
+    try func.body.string(writer);
+    try testing.expectEqualStrings("(x + 2)", array_list.items);
+}
+
 // Test Helpers
 
-fn testEval(input: []const u8, allocator: Allocator) !?obj.Object {
+fn testEval(input: []const u8, allocator: Allocator, maybe_env: ?*Environment) !?obj.Object {
     var lexer = Lexer.init(input);
     var parser = try Parser.init(&lexer, allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
     defer program.deinit();
-    var env = Environment.init(allocator);
-    defer env.deinit();
+
+    var local_env = Environment.init(allocator);
+    const env: *Environment = if (maybe_env) |env| env else &local_env;
+    defer if (maybe_env == null) local_env.deinit();
 
     const node = ast.Node{ .program = program };
-    return try eval(allocator, node, &env);
+    return try eval(allocator, node, env);
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
@@ -547,6 +584,6 @@ fn testNullObject(object: obj.Object) !void {
 }
 
 fn testOutOfMemory(allocator: Allocator, input: []const u8) !void {
-    const maybe = try testEval(input, allocator);
+    const maybe = try testEval(input, allocator, null);
     if (maybe) |actual| actual.deinit(allocator);
 }

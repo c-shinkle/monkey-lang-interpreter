@@ -30,7 +30,14 @@ pub const Environment = struct {
     pub fn set(self: *Environment, name: []const u8, value: obj.Object) !obj.Object {
         const key = try self.alloc.dupe(u8, name);
         errdefer self.alloc.free(key);
-        try self.store.put(self.alloc, key, value);
+        const duped_value = try value.dupe(self.alloc);
+        errdefer {
+            duped_value.deinit(self.alloc);
+            // TODO is this even needed?
+            // self.alloc.destroy(duped_value);
+        }
+
+        try self.store.put(self.alloc, key, duped_value);
         return value;
     }
 };

@@ -5,6 +5,14 @@ pub const TokenType = []const u8;
 pub const Token = struct {
     _type: TokenType,
     literal: []const u8,
+
+    pub fn dupe(self: Token, alloc: std.mem.Allocator) !Token {
+        const duped_literal = try alloc.dupe(u8, self.literal);
+        return Token{
+            ._type = self._type,
+            .literal = duped_literal,
+        };
+    }
 };
 
 pub const ILLEGAL = "ILLEGAL";
