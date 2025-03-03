@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 pub const TokenType = []const u8;
 
@@ -6,12 +7,24 @@ pub const Token = struct {
     _type: TokenType,
     literal: []const u8,
 
-    pub fn dupe(self: Token, alloc: std.mem.Allocator) !Token {
+    pub fn init(_type: TokenType, literal: []const u8, alloc: Allocator) !Token {
+        const duped_literal = try alloc.dupe(u8, literal);
+        return Token{
+            ._type = _type,
+            .literal = duped_literal,
+        };
+    }
+
+    pub fn dupe(self: Token, alloc: Allocator) !Token {
         const duped_literal = try alloc.dupe(u8, self.literal);
         return Token{
             ._type = self._type,
             .literal = duped_literal,
         };
+    }
+
+    pub fn deinit(self: Token, alloc: Allocator) void {
+        alloc.free(self.literal);
     }
 };
 
