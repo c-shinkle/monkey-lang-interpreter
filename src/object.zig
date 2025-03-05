@@ -176,7 +176,7 @@ pub const Function = struct {
     }
 
     pub fn deinit(self: *const Function, alloc: Allocator) void {
-        self.body.deinit(alloc);
+        self.body.parser_deinit(alloc);
         alloc.free(self.parameters);
     }
 

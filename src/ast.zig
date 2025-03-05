@@ -27,10 +27,9 @@ pub const Program = struct {
     allocator: Allocator,
     statements: []const Statement,
 
-    // TODO this will need to be renamed to "parse_deinit" but one dumpster fire at a time
-    pub fn deinit(self: *const Program) void {
+    pub fn parser_deinit(self: *const Program) void {
         for (self.statements) |stmt| {
-            stmt.deinit(self.allocator);
+            stmt.parser_deinit(self.allocator);
         }
         self.allocator.free(self.statements);
     }
@@ -72,7 +71,6 @@ pub const Statement = union(enum) {
     return_statement: ReturnStatement,
     expression_statement: ExpressionStatement,
     block_statement: BlockStatement,
-
     pub fn tokenLiteral(self: *const Statement) []const u8 {
         return switch (self.*) {
             inline else => |stmt| stmt.tokenLiteral(),
@@ -88,6 +86,12 @@ pub const Statement = union(enum) {
     pub fn string(self: *const Statement, writer: AnyWriter) AnyWriter.Error!void {
         switch (self.*) {
             inline else => |stmt| try stmt.string(writer),
+        }
+    }
+
+    pub fn parser_deinit(self: Statement, allocator: std.mem.Allocator) void {
+        switch (self) {
+            inline else => |stmt| stmt.parser_deinit(allocator),
         }
     }
 
@@ -125,6 +129,10 @@ pub const LetStatement = struct {
         try self.value.string(writer);
 
         try writer.writeByte(';');
+    }
+
+    pub fn parser_deinit(self: *const LetStatement, allocator: std.mem.Allocator) void {
+        self.value.parser_deinit(allocator);
     }
 
     pub fn dupe_deinit(self: *const LetStatement, alloc: Allocator) void {
@@ -168,6 +176,10 @@ pub const ReturnStatement = struct {
         try writer.writeByte(';');
     }
 
+    pub fn parser_deinit(self: *const ReturnStatement, allocator: std.mem.Allocator) void {
+        self.return_value.parser_deinit(allocator);
+    }
+
     pub fn dupe_deinit(self: *const ReturnStatement, alloc: Allocator) void {
         self._token.dupe_deinit(alloc);
 
@@ -198,6 +210,10 @@ pub const ExpressionStatement = struct {
 
     pub fn string(self: *const ExpressionStatement, writer: AnyWriter) AnyWriter.Error!void {
         try self.expression.string(writer);
+    }
+
+    pub fn parser_deinit(self: *const ExpressionStatement, allocator: std.mem.Allocator) void {
+        self.expression.parser_deinit(allocator);
     }
 
     pub fn dupe_deinit(self: *const ExpressionStatement, alloc: Allocator) void {
@@ -232,6 +248,13 @@ pub const BlockStatement = struct {
         for (self.statements) |stmt| {
             try stmt.string(writer);
         }
+    }
+
+    pub fn parser_deinit(self: *const BlockStatement, allocator: std.mem.Allocator) void {
+        for (self.statements) |stmt| {
+            stmt.parser_deinit(allocator);
+        }
+        allocator.free(self.statements);
     }
 
     pub fn dupe_deinit(self: *const BlockStatement, alloc: Allocator) void {
@@ -289,6 +312,12 @@ pub const Expression = union(enum) {
         }
     }
 
+    pub fn parser_deinit(self: Expression, allocator: std.mem.Allocator) void {
+        switch (self) {
+            inline else => |exp| exp.parser_deinit(allocator),
+        }
+    }
+
     pub fn dupe_deinit(self: Expression, alloc: Allocator) void {
         switch (self) {
             inline else => |exp| exp.dupe_deinit(alloc),
@@ -314,6 +343,11 @@ pub const Identifier = struct {
 
     pub fn string(self: *const Identifier, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self.value);
+    }
+
+    pub fn parser_deinit(self: *const Identifier, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
     }
 
     pub fn dupe_deinit(self: *const Identifier, alloc: Allocator) void {
@@ -343,6 +377,11 @@ pub const IntegerLiteral = struct {
 
     pub fn string(self: *const IntegerLiteral, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeAll(self._token.literal);
+    }
+
+    pub fn parser_deinit(self: *const IntegerLiteral, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
     }
 
     pub fn dupe_deinit(self: *const IntegerLiteral, alloc: Allocator) void {
@@ -376,6 +415,11 @@ pub const PrefixExpression = struct {
         try writer.writeAll(self.operator);
         try self.right.string(writer);
         try writer.writeByte(')');
+    }
+
+    pub fn parser_deinit(self: *const PrefixExpression, allocator: std.mem.Allocator) void {
+        self.right.parser_deinit(allocator);
+        allocator.destroy(self.right);
     }
 
     pub fn dupe_deinit(self: *const PrefixExpression, alloc: Allocator) void {
@@ -423,6 +467,14 @@ pub const InfixExpression = struct {
         try writer.writeByte(' ');
         try self.right.string(writer);
         try writer.writeByte(')');
+    }
+
+    pub fn parser_deinit(self: *const InfixExpression, allocator: std.mem.Allocator) void {
+        self.left.parser_deinit(allocator);
+        allocator.destroy(self.left);
+
+        self.right.parser_deinit(allocator);
+        allocator.destroy(self.right);
     }
 
     pub fn dupe_deinit(self: *const InfixExpression, alloc: Allocator) void {
@@ -475,6 +527,11 @@ pub const Boolean = struct {
         try writer.writeAll(self._token.literal);
     }
 
+    pub fn parser_deinit(self: *const Boolean, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
+    }
+
     pub fn dupe_deinit(self: *const Boolean, alloc: Allocator) void {
         self._token.dupe_deinit(alloc);
     }
@@ -510,6 +567,19 @@ pub const IfExpression = struct {
         if (self.alternative) |alt| {
             try writer.writeAll(" else ");
             try alt.string(writer);
+        }
+    }
+
+    pub fn parser_deinit(self: *const IfExpression, allocator: std.mem.Allocator) void {
+        self.condition.parser_deinit(allocator);
+        allocator.destroy(self.condition);
+
+        self.consequence.parser_deinit(allocator);
+        allocator.destroy(self.consequence);
+
+        if (self.alternative) |alt| {
+            alt.parser_deinit(allocator);
+            allocator.destroy(alt);
         }
     }
 
@@ -583,6 +653,16 @@ pub const FunctionLiteral = struct {
         try self.body.string(writer);
     }
 
+    pub fn parser_deinit(self: *const FunctionLiteral, allocator: std.mem.Allocator) void {
+        self.body.parser_deinit(allocator);
+
+        // TODO I'll keep this for completion sake, but this truely is redundant
+        for (self.parameters) |param| {
+            param.parser_deinit(allocator);
+        }
+        allocator.free(self.parameters);
+    }
+
     pub fn dupe(self: FunctionLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         var duped_parameters = std.ArrayList(Identifier).init(alloc);
@@ -640,6 +720,16 @@ pub const CallExpression = struct {
             }
         }
         try writer.writeByte(')');
+    }
+
+    pub fn parser_deinit(self: *const CallExpression, allocator: std.mem.Allocator) void {
+        self.function.parser_deinit(allocator);
+        allocator.destroy(self.function);
+
+        for (self.arguments) |arg| {
+            arg.parser_deinit(allocator);
+        }
+        allocator.free(self.arguments);
     }
 
     pub fn dupe_deinit(self: *const CallExpression, alloc: Allocator) void {

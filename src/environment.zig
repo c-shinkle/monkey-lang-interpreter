@@ -8,10 +8,7 @@ pub const Environment = struct {
     store: std.StringHashMapUnmanaged(obj.Object),
 
     pub fn init(alloc: Allocator) Environment {
-        return Environment{
-            .alloc = alloc,
-            .store = std.StringHashMapUnmanaged(obj.Object).empty,
-        };
+        return Environment{ .alloc = alloc, .store = .empty };
     }
 
     pub fn deinit(self: *Environment) void {
@@ -30,12 +27,9 @@ pub const Environment = struct {
     pub fn set(self: *Environment, name: []const u8, value: obj.Object) !obj.Object {
         const key = try self.alloc.dupe(u8, name);
         errdefer self.alloc.free(key);
+
         const duped_value = try value.dupe(self.alloc);
-        errdefer {
-            duped_value.deinit(self.alloc);
-            // TODO is this even needed?
-            // self.alloc.destroy(duped_value);
-        }
+        errdefer duped_value.deinit(self.alloc);
 
         try self.store.put(self.alloc, key, duped_value);
         return value;

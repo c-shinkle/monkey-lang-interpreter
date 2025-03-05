@@ -106,7 +106,7 @@ pub const Parser = struct {
         var list = std.ArrayList(ast.Statement).init(self.allocator);
         errdefer {
             for (list.items) |stmt| {
-                stmt.deinit(self.allocator);
+                stmt.parser_deinit(self.allocator);
             }
             list.deinit();
         }
@@ -115,7 +115,7 @@ pub const Parser = struct {
             const maybe_stmt = self.parseStatement();
             errdefer {
                 if (maybe_stmt) |stmt| {
-                    stmt.deinit(self.allocator);
+                    stmt.parser_deinit(self.allocator);
                 } else |_| {}
             }
 
@@ -223,7 +223,7 @@ pub const Parser = struct {
         var statements = std.ArrayList(ast.Statement).init(self.allocator);
         errdefer {
             for (statements.items) |stmt| {
-                stmt.deinit(self.allocator);
+                stmt.parser_deinit(self.allocator);
             }
             statements.deinit();
         }
@@ -233,7 +233,7 @@ pub const Parser = struct {
             !self.curTokenIs(token.EOF)) : (self.nextToken())
         {
             const statement = try self.parseStatement();
-            errdefer statement.deinit(self.allocator);
+            errdefer statement.parser_deinit(self.allocator);
             try statements.append(statement);
         }
 
@@ -254,7 +254,7 @@ pub const Parser = struct {
         while (!self.peekTokenIs(token.SEMICOLON) and
             precedence_int < @intFromEnum(self.peekPrecedence()))
         {
-            errdefer left_exp.deinit(self.allocator);
+            errdefer left_exp.parser_deinit(self.allocator);
 
             const infix = self.infix_parse_fns.get(self.peek_token._type) orelse return left_exp;
             self.nextToken();
@@ -350,7 +350,7 @@ pub const Parser = struct {
         const condition = try self.allocator.create(ast.Expression);
         errdefer self.allocator.destroy(condition);
         condition.* = try self.parseExpression(Precedence.LOWEST);
-        errdefer condition.deinit(self.allocator);
+        errdefer condition.parser_deinit(self.allocator);
 
         if (!self.expectPeek(token.RPAREN)) {
             return ParserError.MissingRightParenthesis;
@@ -362,7 +362,7 @@ pub const Parser = struct {
         const consequence = try self.allocator.create(ast.BlockStatement);
         errdefer self.allocator.destroy(consequence);
         consequence.* = try self.parseBlockStatement();
-        errdefer consequence.deinit(self.allocator);
+        errdefer consequence.parser_deinit(self.allocator);
 
         var maybe_alt: ?*ast.BlockStatement = null;
         if (self.peekTokenIs(token.ELSE)) {
@@ -374,7 +374,7 @@ pub const Parser = struct {
             maybe_alt = try self.allocator.create(ast.BlockStatement);
             errdefer self.allocator.destroy(maybe_alt.?);
             maybe_alt.?.* = try self.parseBlockStatement();
-            // errdefer maybe_alt.?.deinit(self.allocator);
+            // errdefer maybe_alt.?.parser_deinit(self.allocator);
         }
 
         return ast.Expression{
@@ -461,7 +461,7 @@ pub const Parser = struct {
         var args = std.ArrayList(ast.Expression).init(self.allocator);
         errdefer {
             if (args.items.len > 0) for (args.items[1..]) |arg| {
-                arg.deinit(self.allocator);
+                arg.parser_deinit(self.allocator);
             };
             args.deinit();
         }
@@ -474,14 +474,14 @@ pub const Parser = struct {
         self.nextToken();
 
         const first_exp = try self.parseExpression(Precedence.LOWEST);
-        errdefer first_exp.deinit(self.allocator);
+        errdefer first_exp.parser_deinit(self.allocator);
         try args.append(first_exp);
 
         while (self.peekTokenIs(token.COMMA)) {
             self.nextToken();
             self.nextToken();
             const loop_exp = try self.parseExpression(Precedence.LOWEST);
-            errdefer loop_exp.deinit(self.allocator);
+            errdefer loop_exp.parser_deinit(self.allocator);
             try args.append(loop_exp);
         }
 
@@ -608,7 +608,7 @@ test "Let Statement" {
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
         try checkParserErrors(&parser);
 
         const stmts = program.statements;
@@ -638,7 +638,7 @@ test "Return Statement" {
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
         try checkParserErrors(&parser);
 
         const stmts = program.statements;
@@ -664,7 +664,7 @@ test "Identifier Expression" {
     var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
@@ -697,7 +697,7 @@ test "Integer Literal Expression" {
     var parser = try Parser.init(&l, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
@@ -736,7 +736,7 @@ test "Prefix Expression" {
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
         try checkParserErrors(&parser);
 
         const stmt = program.statements;
@@ -776,7 +776,7 @@ test "Infix Expression" {
         var parser = try Parser.init(&l, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
 
         try checkParserErrors(&parser);
 
@@ -912,7 +912,7 @@ test "Operator Precedence" {
         var parser = try Parser.init(&lexer, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
         try checkParserErrors(&parser);
 
         try program.string(writer);
@@ -936,7 +936,7 @@ test "Boolean Expression" {
         var parser = try Parser.init(&lexer, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
         try checkParserErrors(&parser);
 
         const stmts = program.statements;
@@ -964,7 +964,7 @@ test "If Expression" {
     var parser = try Parser.init(&lexer, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
@@ -1001,7 +1001,7 @@ test "If Else Expression" {
     var parser = try Parser.init(&lexer, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
@@ -1044,7 +1044,7 @@ test "Function Literal Expression" {
     var parser = try Parser.init(&lexer, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
@@ -1100,7 +1100,7 @@ test "Function Parameter Parsing" {
         var parser = try Parser.init(&lexer, testing.allocator);
         defer parser.deinit();
         const program = try parser.parseProgram();
-        defer program.deinit();
+        defer program.parser_deinit();
         try checkParserErrors(&parser);
 
         const stmt = switch (program.statements[0]) {
@@ -1129,7 +1129,7 @@ test "Call Expression Parsing" {
     var parser = try Parser.init(&lexer, testing.allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
     try checkParserErrors(&parser);
 
     const stmts = program.statements;
@@ -1167,7 +1167,7 @@ fn testOutOfMemory(allocator: std.mem.Allocator, input: []const u8) !void {
     var parser = try Parser.init(&lexer, allocator);
     defer parser.deinit();
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
 }
 
 fn testOutOfMemoryWithParserErrors(
@@ -1180,7 +1180,7 @@ fn testOutOfMemoryWithParserErrors(
     defer parser.deinit();
 
     const program = try parser.parseProgram();
-    defer program.deinit();
+    defer program.parser_deinit();
 
     const parser_errors = parser.errors.items;
 
