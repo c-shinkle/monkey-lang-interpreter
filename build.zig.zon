@@ -1,9 +1,8 @@
 .{
-    .name = "monkey-lang-interpreter",
-
+    .name = .monkey_lang_interpreter,
     .version = "0.0.0",
-
-    .dependencies = .{},
+    .fingerprint = 0xf1005f8723ac9884,
+    .minimum_zig_version = "0.14.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",

@@ -96,7 +96,16 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
                     .env = env,
                 },
             },
-            else => null,
+            .call_expression => |call_fn| {
+                const maybe = try eval(alloc, ast.Node{ .expression = call_fn.function.* }, env);
+                if (is_error(maybe)) return maybe;
+
+                const args = try evalExpressions(alloc, call_fn.arguments, env);
+                defer alloc.free(args);
+                if (args.len == 1 and is_error(args[0])) return args[0];
+
+                return applyFunction(alloc, maybe.?, args);
+            },
         },
     };
 }
@@ -280,6 +289,81 @@ fn eval_identifier(
 ) EvalError!obj.Object {
     const maybe = env.get(ident.value);
     return maybe orelse new_error(alloc, "identifier not found: {s}", .{ident.value});
+}
+
+fn evalExpressions(
+    alloc: Allocator,
+    exps: []const ast.Expression,
+    env: *Environment,
+) Allocator.Error![]const obj.Object {
+    var evaluateds = std.ArrayList(obj.Object).init(alloc);
+    errdefer {
+        for (evaluateds.items) |object| object.deinit(alloc);
+        evaluateds.deinit();
+    }
+
+    for (exps) |exp| {
+        const maybe_eval = try eval(alloc, ast.Node{ .expression = exp }, env);
+        const evaluated = maybe_eval.?;
+        errdefer evaluated.deinit(alloc);
+
+        if (is_error(evaluated)) {
+            for (evaluateds.items) |object| object.deinit(alloc);
+            try evaluateds.append(evaluated);
+            return try evaluateds.toOwnedSlice();
+        }
+
+        try evaluateds.append(evaluated);
+    }
+
+    return try evaluateds.toOwnedSlice();
+}
+
+fn applyFunction(
+    alloc: Allocator,
+    func: obj.Object,
+    arguments: []const obj.Object,
+) EvalError!?obj.Object {
+    if (func != ._function) {
+        return try new_error(alloc, "not a function: {}", .{func});
+    }
+    const function = func._function;
+
+    const node = ast.Node{ .statement = ast.Statement{ .block_statement = function.body } };
+
+    var extended_environment = try extendFunctionEnv(function, arguments);
+    defer extended_environment.deinit();
+
+    const evaluated = try eval(alloc, node, &extended_environment);
+    return unwrapReturnValue(alloc, evaluated);
+}
+
+fn extendFunctionEnv(function: obj.Function, arguments: []const obj.Object) !Environment {
+    var inner_env = Environment{
+        .alloc = function.env.alloc,
+        .store = .empty,
+        .outer = function.env,
+    };
+
+    for (function.parameters, 0..) |param, i| {
+        _ = try inner_env.set(param.value, arguments[i]);
+    }
+
+    return inner_env;
+}
+
+fn unwrapReturnValue(alloc: Allocator, maybe_object: ?obj.Object) ?obj.Object {
+    if (maybe_object) |object| {
+        if (object == .return_value) {
+            if (object.return_value.value) |val| {
+                const temp = val.*;
+                alloc.destroy(val);
+                return temp;
+            }
+            return null;
+        }
+    }
+    return maybe_object;
 }
 
 // Test Suite
@@ -570,6 +654,25 @@ test "Function Object" {
 
     try func.body.string(writer);
     try testing.expectEqualStrings("(x + 2)", array_list.items);
+}
+
+test "Function Application" {
+    const eval_tests = [_]struct { input: []const u8, expected: i64 }{
+        .{ .input = "let identity = fn(x) { x } ; identity(5);", .expected = 5 },
+        .{ .input = "let identity = fn(x) { return x; } ; identity(5);", .expected = 5 },
+        .{ .input = "let double = fn(x) { x * 2; }; double(5);", .expected = 10 },
+        .{ .input = "let add = fn(x, y) { x + y; }; add(5, 5);", .expected = 10 },
+        .{ .input = "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));", .expected = 20 },
+        .{ .input = "fn(x) { x; }(5)", .expected = 5 },
+    };
+
+    for (eval_tests) |eval_test| {
+        var env = Environment.init(testing.allocator);
+        defer env.deinit();
+        const actual = try testEval(eval_test.input, testing.allocator, &env);
+        defer actual.?.deinit(testing.allocator);
+        try testIntegerObject(eval_test.expected, actual.?);
+    }
 }
 
 // Test Helpers
