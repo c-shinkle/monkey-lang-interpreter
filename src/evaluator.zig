@@ -296,10 +296,10 @@ fn evalExpressions(
     exps: []const ast.Expression,
     env: *Environment,
 ) Allocator.Error![]const obj.Object {
-    var evaluateds = std.ArrayList(obj.Object).init(alloc);
+    var evaluateds = std.ArrayListUnmanaged(obj.Object).empty;
     errdefer {
         for (evaluateds.items) |object| object.deinit(alloc);
-        evaluateds.deinit();
+        evaluateds.deinit(alloc);
     }
 
     for (exps) |exp| {
@@ -308,15 +308,15 @@ fn evalExpressions(
         errdefer evaluated.deinit(alloc);
 
         if (is_error(evaluated)) {
-            for (evaluateds.items) |object| object.deinit(alloc);
-            try evaluateds.append(evaluated);
-            return try evaluateds.toOwnedSlice();
+            while (evaluateds.pop()) |object| object.deinit(alloc);
+            try evaluateds.append(alloc, evaluated);
+            return try evaluateds.toOwnedSlice(alloc);
         }
 
-        try evaluateds.append(evaluated);
+        try evaluateds.append(alloc, evaluated);
     }
 
-    return try evaluateds.toOwnedSlice();
+    return try evaluateds.toOwnedSlice(alloc);
 }
 
 fn applyFunction(
@@ -630,9 +630,9 @@ test "Function Object" {
 
     var lexer = Lexer.init(input);
     var parser = try Parser.init(&lexer, parser_allocator);
-    defer parser.deinit();
-    const program = try parser.parseProgram();
-    defer program.parser_deinit();
+    defer parser.deinit(parser_allocator);
+    const program = try parser.parseProgram(parser_allocator);
+    defer program.parser_deinit(parser_allocator);
 
     const node = ast.Node{ .program = program };
     const evaluated = try eval(parser_allocator, node, &env);
@@ -644,9 +644,9 @@ test "Function Object" {
     const func = evaluated.?._function;
     try testing.expectEqual(1, func.parameters.len);
 
-    var array_list = std.ArrayList(u8).init(testing.allocator);
-    defer array_list.deinit();
-    const writer = array_list.writer().any();
+    var array_list = std.ArrayListUnmanaged(u8).empty;
+    defer array_list.deinit(testing.allocator);
+    const writer = array_list.writer(testing.allocator).any();
 
     try func.parameters[0].string(writer);
     try testing.expectEqualStrings("x", array_list.items);
@@ -675,17 +675,30 @@ test "Function Application" {
     }
 }
 
+// test "Nested functions" {
+//     const input =
+//         \\let newAdder = fn(x) { fn(y) { x + y} };
+//         \\let addTwo = newAdder(2);
+//         \\addTwo(3);
+//     ;
+//     var env = Environment.init(testing.allocator);
+//     defer env.deinit();
+//     const actual = try testEval(input, testing.allocator, &env);
+//     defer actual.?.deinit(testing.allocator);
+//     try testIntegerObject(5, actual.?);
+// }
+
 // Test Helpers
 
-fn testEval(input: []const u8, allocator: Allocator, env: *Environment) !?obj.Object {
+fn testEval(input: []const u8, alloc: Allocator, env: *Environment) !?obj.Object {
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, allocator);
-    defer parser.deinit();
-    const program = try parser.parseProgram();
-    defer program.parser_deinit();
+    var parser = try Parser.init(&lexer, alloc);
+    defer parser.deinit(alloc);
+    const program = try parser.parseProgram(alloc);
+    defer program.parser_deinit(alloc);
 
     const node = ast.Node{ .program = program };
-    return try eval(allocator, node, env);
+    return try eval(alloc, node, env);
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {

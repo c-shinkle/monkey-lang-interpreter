@@ -20,7 +20,7 @@ pub fn start(stdout: AnyWriter) !void {
     var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
 
-    var env = Environment.init(std.heap.c_allocator);
+    var env = Environment.init(std.heap.smp_allocator);
     defer env.deinit();
 
     try stdout.print(">> ", .{});
@@ -38,12 +38,12 @@ pub fn start(stdout: AnyWriter) !void {
         }
         var lexer = Lexer.init(stream.getWritten());
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer arena.deinit();
         const alloc = arena.allocator();
 
         var parser = try Parser.init(&lexer, alloc);
-        const program = try parser.parseProgram();
+        const program = try parser.parseProgram(alloc);
         if (program.statements.len > 0) {
             const maybe = try evaluator.eval(alloc, ast.Node{ .program = program }, &env);
             if (maybe) |evaluated| {

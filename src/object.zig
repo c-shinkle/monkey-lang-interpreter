@@ -185,18 +185,18 @@ pub const Function = struct {
     }
 
     pub fn dupe(self: Function, alloc: Allocator) Allocator.Error!Object {
-        var duped_parameters = std.ArrayList(ast.Identifier).init(alloc);
+        var duped_parameters = std.ArrayListUnmanaged(ast.Identifier).empty;
         for (self.parameters) |param| {
             const duped_param = try param.dupe(alloc);
             std.debug.assert(duped_param == .identifier);
-            try duped_parameters.append(duped_param.identifier);
+            try duped_parameters.append(alloc, duped_param.identifier);
         }
         const duped_body = try self.body.dupe(alloc);
         std.debug.assert(duped_body == .block_statement);
 
         return Object{
             ._function = Function{
-                .parameters = try duped_parameters.toOwnedSlice(),
+                .parameters = try duped_parameters.toOwnedSlice(alloc),
                 .body = duped_body.block_statement,
                 .env = self.env,
             },
@@ -217,9 +217,9 @@ test "Object inspect" {
         }, .expected = "null" },
     };
 
-    var array_list = std.ArrayList(u8).init(testing.allocator);
-    defer array_list.deinit();
-    const writer = array_list.writer().any();
+    var array_list = std.ArrayListUnmanaged(u8).empty;
+    defer array_list.deinit(testing.allocator);
+    const writer = array_list.writer(testing.allocator).any();
     for (object_tests) |object_test| {
         try object_test.object.inspect(writer);
         try testing.expectEqualStrings(object_test.expected, array_list.items);

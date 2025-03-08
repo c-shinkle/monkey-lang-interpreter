@@ -22,7 +22,9 @@ pub const Environment = struct {
     }
 
     pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
-        return self.store.get(name) orelse if (self.outer) |outer| outer.get(name) else null;
+        if (self.store.get(name)) |some| return some;
+        if (self.outer) |outer| return outer.get(name);
+        return null;
     }
 
     pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Error!obj.Object {
