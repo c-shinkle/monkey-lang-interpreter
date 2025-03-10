@@ -154,7 +154,7 @@ pub const Error = struct {
 };
 
 pub const Function = struct {
-    parameters: []ast.Identifier,
+    parameters: []const ast.Identifier,
     body: ast.BlockStatement,
     env: *Environment,
 
@@ -176,22 +176,30 @@ pub const Function = struct {
     }
 
     pub fn deinit(self: *const Function, alloc: Allocator) void {
-        self.body.dupe_deinit(alloc);
-
         for (self.parameters) |param| {
             param.dupe_deinit(alloc);
         }
         alloc.free(self.parameters);
+
+        self.body.dupe_deinit(alloc);
     }
 
     pub fn dupe(self: Function, alloc: Allocator) Allocator.Error!Object {
         var duped_parameters = std.ArrayListUnmanaged(ast.Identifier).empty;
+        errdefer {
+            for (duped_parameters.items) |item| {
+                item.dupe_deinit(alloc);
+            }
+            duped_parameters.deinit(alloc);
+        }
         for (self.parameters) |param| {
             const duped_param = try param.dupe(alloc);
+            errdefer duped_param.dupe_deinit(alloc);
             std.debug.assert(duped_param == .identifier);
             try duped_parameters.append(alloc, duped_param.identifier);
         }
         const duped_body = try self.body.dupe(alloc);
+        errdefer duped_body.dupe_deinit(alloc);
         std.debug.assert(duped_body == .block_statement);
 
         return Object{

@@ -134,7 +134,7 @@ pub const LetStatement = struct {
         self.value.parser_deinit(allocator);
     }
 
-    pub fn dupe(self: LetStatement, alloc: Allocator) !Statement {
+    pub fn dupe(self: *const LetStatement, alloc: Allocator) !Statement {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_name = try self.name.dupe(alloc);
@@ -182,7 +182,7 @@ pub const ReturnStatement = struct {
         self.return_value.parser_deinit(allocator);
     }
 
-    pub fn dupe(self: ReturnStatement, alloc: Allocator) !Statement {
+    pub fn dupe(self: *const ReturnStatement, alloc: Allocator) !Statement {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_return_value = try self.return_value.dupe(alloc);
@@ -220,7 +220,7 @@ pub const ExpressionStatement = struct {
         self.expression.parser_deinit(allocator);
     }
 
-    pub fn dupe(self: ExpressionStatement, alloc: Allocator) !Statement {
+    pub fn dupe(self: *const ExpressionStatement, alloc: Allocator) !Statement {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_expression = try self.expression.dupe(alloc);
@@ -263,7 +263,7 @@ pub const BlockStatement = struct {
         allocator.free(self.statements);
     }
 
-    pub fn dupe(self: BlockStatement, alloc: Allocator) !Statement {
+    pub fn dupe(self: *const BlockStatement, alloc: Allocator) !Statement {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         var duped_array_list = std.ArrayListUnmanaged(Statement).empty;
@@ -396,7 +396,7 @@ pub const IntegerLiteral = struct {
         _ = allocator; // autofix
     }
 
-    pub fn dupe(self: IntegerLiteral, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const IntegerLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         return Expression{
             .integer_literal = IntegerLiteral{
@@ -434,7 +434,7 @@ pub const PrefixExpression = struct {
         allocator.destroy(self.right);
     }
 
-    pub fn dupe(self: PrefixExpression, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const PrefixExpression, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_operator = try alloc.dupe(u8, self.operator);
@@ -493,7 +493,7 @@ pub const InfixExpression = struct {
         allocator.destroy(self.right);
     }
 
-    pub fn dupe(self: InfixExpression, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const InfixExpression, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
@@ -558,7 +558,7 @@ pub const Boolean = struct {
         self._token.dupe_deinit(alloc);
     }
 
-    pub fn dupe(self: Boolean, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const Boolean, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         return Expression{
             .boolean_expression = Boolean{
@@ -605,7 +605,7 @@ pub const IfExpression = struct {
         }
     }
 
-    pub fn dupe(self: IfExpression, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const IfExpression, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
@@ -692,7 +692,7 @@ pub const FunctionLiteral = struct {
         allocator.free(self.parameters);
     }
 
-    pub fn dupe(self: FunctionLiteral, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const FunctionLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         var duped_array_list = std.ArrayListUnmanaged(Identifier).empty;
@@ -774,7 +774,7 @@ pub const CallExpression = struct {
         allocator.free(self.arguments);
     }
 
-    pub fn dupe(self: CallExpression, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const CallExpression, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 

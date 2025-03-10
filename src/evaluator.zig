@@ -24,7 +24,8 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
                 if (is_error(maybe)) return maybe;
 
                 const let_value = maybe orelse return null;
-                _ = try env.set(let_stmt.name.value, let_value);
+                defer let_value.deinit(alloc);
+                try env.set(let_stmt.name.value, let_value);
                 return null;
             },
             .expression_statement => |exp_stmt| try eval(
@@ -89,19 +90,37 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
             },
             .boolean_expression => |boolean| if (boolean.value) TRUE else FALSE,
             .if_expression => |if_exp| try evalIfExpression(alloc, if_exp, env),
-            .function_literal => |fn_lit| obj.Object{
-                ._function = obj.Function{
-                    .parameters = fn_lit.parameters,
-                    .body = fn_lit.body,
-                    .env = env,
-                },
+            .function_literal => |fn_lit| {
+                const duped_function_literal = try fn_lit.dupe(alloc);
+                std.debug.assert(duped_function_literal == .function_literal);
+                duped_function_literal.function_literal._token.dupe_deinit(alloc);
+
+                return obj.Object{
+                    ._function = obj.Function{
+                        .parameters = duped_function_literal.function_literal.parameters,
+                        .body = duped_function_literal.function_literal.body,
+                        .env = env,
+                    },
+                };
             },
             .call_expression => |call_fn| {
-                const maybe = try eval(alloc, ast.Node{ .expression = call_fn.function.* }, env);
+                const duped_function = try call_fn.dupe(alloc);
+                defer duped_function.dupe_deinit(alloc);
+                std.debug.assert(duped_function == .call_expression);
+                const duped_call_exp = duped_function.call_expression;
+
+                const node_call_exp = ast.Node{ .expression = duped_call_exp.function.* };
+                const maybe = try eval(alloc, node_call_exp, env);
+                defer if (maybe) |evaluated| evaluated.deinit(alloc);
                 if (is_error(maybe)) return maybe;
 
-                const args = try evalExpressions(alloc, call_fn.arguments, env);
-                defer alloc.free(args);
+                const args = try evalExpressions(alloc, duped_call_exp.arguments, env);
+                defer {
+                    for (args) |arg| {
+                        arg.deinit(alloc);
+                    }
+                    alloc.free(args);
+                }
                 if (args.len == 1 and is_error(args[0])) return args[0];
 
                 return applyFunction(alloc, maybe.?, args);
@@ -288,7 +307,10 @@ fn eval_identifier(
     env: *Environment,
 ) EvalError!obj.Object {
     const maybe = env.get(ident.value);
-    return maybe orelse new_error(alloc, "identifier not found: {s}", .{ident.value});
+    if (maybe) |identifier_value| {
+        return try identifier_value.dupe(alloc);
+    }
+    return new_error(alloc, "identifier not found: {s}", .{ident.value});
 }
 
 fn evalExpressions(
@@ -344,9 +366,10 @@ fn extendFunctionEnv(function: obj.Function, arguments: []const obj.Object) !Env
         .store = .empty,
         .outer = function.env,
     };
+    errdefer inner_env.deinit();
 
     for (function.parameters, 0..) |param, i| {
-        _ = try inner_env.set(param.value, arguments[i]);
+        try inner_env.set(param.value, arguments[i]);
     }
 
     return inner_env;
@@ -395,6 +418,10 @@ test "Out of Memory" {
         \\}
         \\let a = 5; let b = a; b;
         ,
+        "fn(x) { x + 2 };",
+        "let identity = fn(x) { x } ; identity(5);",
+        "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));",
+        "fn(x) { x; }(5)",
     };
 
     for (inputs) |input| {
@@ -617,31 +644,26 @@ test "Let Statements" {
 }
 
 test "Function Object" {
-    var env_allocator = std.heap.DebugAllocator(.{}){};
-    defer {
-        const result = env_allocator.deinit();
-        testing.expect(result == .ok) catch @panic("env_allocator not ok!");
-    }
-    const parser_allocator = testing.allocator;
-
     const input = "fn(x) { x + 2 };";
-    var env = Environment.init(env_allocator.allocator());
+    var env = Environment.init(testing.allocator);
     defer env.deinit();
 
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, parser_allocator);
-    defer parser.deinit(parser_allocator);
-    const program = try parser.parseProgram(parser_allocator);
-    defer program.parser_deinit(parser_allocator);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit(testing.allocator);
+    const program = try parser.parseProgram(testing.allocator);
+    defer program.parser_deinit(testing.allocator);
 
     const node = ast.Node{ .program = program };
-    const evaluated = try eval(parser_allocator, node, &env);
+    const evaluated = try eval(testing.allocator, node, &env);
     if (evaluated.? != ._function) {
         std.debug.print("object is not Function. got={?any}\n", .{evaluated});
         return error.TestExpectedEqual;
     }
 
     const func = evaluated.?._function;
+    defer func.deinit(testing.allocator);
+
     try testing.expectEqual(1, func.parameters.len);
 
     var array_list = std.ArrayListUnmanaged(u8).empty;
@@ -669,8 +691,17 @@ test "Function Application" {
     for (eval_tests) |eval_test| {
         var env = Environment.init(testing.allocator);
         defer env.deinit();
-        const actual = try testEval(eval_test.input, testing.allocator, &env);
+
+        var lexer = Lexer.init(eval_test.input);
+        var parser = try Parser.init(&lexer, testing.allocator);
+        defer parser.deinit(testing.allocator);
+        const program = try parser.parseProgram(testing.allocator);
+        defer program.parser_deinit(testing.allocator);
+
+        const node = ast.Node{ .program = program };
+        const actual = try eval(testing.allocator, node, &env);
         defer actual.?.deinit(testing.allocator);
+
         try testIntegerObject(eval_test.expected, actual.?);
     }
 }
@@ -683,7 +714,15 @@ test "Function Application" {
 //     ;
 //     var env = Environment.init(testing.allocator);
 //     defer env.deinit();
-//     const actual = try testEval(input, testing.allocator, &env);
+//
+//     var lexer = Lexer.init(input);
+//     var parser = try Parser.init(&lexer, testing.allocator);
+//     defer parser.deinit(testing.allocator);
+//     const program = try parser.parseProgram(testing.allocator);
+//     defer program.parser_deinit(testing.allocator);
+//
+//     const node = ast.Node{ .program = program };
+//     const actual = try eval(testing.allocator, node, &env);
 //     defer actual.?.deinit(testing.allocator);
 //     try testIntegerObject(5, actual.?);
 // }
@@ -725,7 +764,7 @@ fn testNullObject(object: obj.Object) !void {
 }
 
 fn testOutOfMemory(allocator: Allocator, input: []const u8) !void {
-    var env = Environment.init(testing.allocator);
+    var env = Environment.init(allocator);
     defer env.deinit();
 
     const maybe = try testEval(input, allocator, &env);

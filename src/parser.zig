@@ -446,7 +446,11 @@ pub const Parser = struct {
         return try identifiers.toOwnedSlice(alloc);
     }
 
-    fn parseCallExpression(self: *Parser, alloc: Allocator, lhs: ast.Expression) ParserError!ast.Expression {
+    fn parseCallExpression(
+        self: *Parser,
+        alloc: Allocator,
+        lhs: ast.Expression, // Identifier or Function Literal
+    ) ParserError!ast.Expression {
         const function = try alloc.create(ast.Expression);
         errdefer alloc.destroy(function);
         function.* = lhs;

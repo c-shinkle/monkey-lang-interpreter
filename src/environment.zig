@@ -27,7 +27,7 @@ pub const Environment = struct {
         return null;
     }
 
-    pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Error!obj.Object {
+    pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Error!void {
         const key = try self.alloc.dupe(u8, name);
         errdefer self.alloc.free(key);
 
@@ -35,6 +35,5 @@ pub const Environment = struct {
         errdefer duped_value.deinit(self.alloc);
 
         try self.store.put(self.alloc, key, duped_value);
-        return value;
     }
 };
