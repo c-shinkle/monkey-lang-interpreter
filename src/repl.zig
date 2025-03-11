@@ -30,7 +30,7 @@ pub fn start(stdout: AnyWriter) !void {
         stream.reset();
     }) {
         stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size) catch |e| return switch (e) {
-            error.EndOfStream => stdout.writeByte('\n'),
+            error.EndOfStream => try stdout.writeByte('\n'),
             else => e,
         };
         if (std.mem.eql(u8, stream.getWritten(), "exit")) {

@@ -6,7 +6,7 @@ const obj = @import("object.zig");
 pub const Environment = struct {
     alloc: Allocator,
     store: std.StringHashMapUnmanaged(obj.Object),
-    outer: ?*Environment,
+    outer: ?*const Environment,
 
     pub fn init(alloc: Allocator) Environment {
         return Environment{ .alloc = alloc, .store = .empty, .outer = null };
@@ -19,6 +19,17 @@ pub const Environment = struct {
             entry.value_ptr.deinit(self.alloc);
         }
         self.store.deinit(self.alloc);
+    }
+
+    pub fn dupe(self: *const Environment) Allocator.Error!Environment {
+        var duped_env = Environment{ .alloc = self.alloc, .store = .empty, .outer = self.outer };
+
+        var iter = self.store.iterator();
+        while (iter.next()) |entry| {
+            try duped_env.set(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        return duped_env;
     }
 
     pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
@@ -35,5 +46,9 @@ pub const Environment = struct {
         errdefer duped_value.deinit(self.alloc);
 
         try self.store.put(self.alloc, key, duped_value);
+    }
+
+    pub fn isRootEnvironment(self: *const Environment) bool {
+        return self.outer == null;
     }
 };

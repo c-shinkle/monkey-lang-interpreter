@@ -685,7 +685,6 @@ pub const FunctionLiteral = struct {
     pub fn parser_deinit(self: *const FunctionLiteral, allocator: std.mem.Allocator) void {
         self.body.parser_deinit(allocator);
 
-        // TODO I'll keep this for completion sake, but this truely is redundant
         for (self.parameters) |param| {
             param.parser_deinit(allocator);
         }

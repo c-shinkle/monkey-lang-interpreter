@@ -11,12 +11,8 @@ const Token = @import("token.zig").Token;
 
 const EvalError = Allocator.Error || std.fmt.AllocPrintError;
 
-pub const TRUE = obj.Object{ .boolean = obj.Boolean{ .value = true } };
-pub const FALSE = obj.Object{ .boolean = obj.Boolean{ .value = false } };
-pub const NULL = obj.Object{ ._null = obj.Null{} };
-
-pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.Object {
-    return switch (node) {
+pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalError!?obj.Object {
+    return switch (parent_node) {
         .program => |prog| try evalProgram(alloc, prog.statements, env),
         .statement => |stmt| switch (stmt) {
             .let_statement => |let_stmt| {
@@ -28,11 +24,10 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
                 try env.set(let_stmt.name.value, let_value);
                 return null;
             },
-            .expression_statement => |exp_stmt| try eval(
-                alloc,
-                ast.Node{ .expression = exp_stmt.expression },
-                env,
-            ),
+            .expression_statement => |exp_stmt| {
+                const child_node = ast.Node{ .expression = exp_stmt.expression };
+                return try eval(alloc, child_node, env);
+            },
             .block_statement => |blk_stmt| try evalBlockStatement(alloc, blk_stmt, env),
             .return_statement => |ret_stmt| {
                 const maybe_object = try eval(
@@ -66,65 +61,22 @@ pub fn eval(alloc: Allocator, node: ast.Node, env: *Environment) EvalError!?obj.
                 return try evalPrefixExpression(alloc, prefix.operator, right);
             },
             .infix_expression => |infix| {
-                const maybe_left = try eval(
-                    alloc,
-                    ast.Node{ .expression = infix.left.* },
-                    env,
-                );
-                if (is_error(maybe_left)) return maybe_left;
+                const left_node = ast.Node{ .expression = infix.left.* };
+                const left_obj = try eval(alloc, left_node, env) orelse return null;
+                if (is_error(left_obj)) return left_obj;
+                errdefer left_obj.deinit(alloc);
 
-                const left = maybe_left orelse return null;
-                errdefer left.deinit(alloc);
+                const right_node = ast.Node{ .expression = infix.right.* };
+                const right_obj = try eval(alloc, right_node, env) orelse return null;
+                if (is_error(right_obj)) return right_obj;
+                errdefer right_obj.deinit(alloc);
 
-                const maybe_right = try eval(
-                    alloc,
-                    ast.Node{ .expression = infix.right.* },
-                    env,
-                );
-                if (is_error(maybe_right)) return maybe_right;
-
-                const right = maybe_right orelse return null;
-                errdefer right.deinit(alloc);
-
-                return try evalInfixOperatorExpression(alloc, infix.operator, left, right);
+                return try evalInfixOperatorExpression(alloc, infix.operator, left_obj, right_obj);
             },
-            .boolean_expression => |boolean| if (boolean.value) TRUE else FALSE,
+            .boolean_expression => |boolean| if (boolean.value) obj.TRUE else obj.FALSE,
             .if_expression => |if_exp| try evalIfExpression(alloc, if_exp, env),
-            .function_literal => |fn_lit| {
-                const duped_function_literal = try fn_lit.dupe(alloc);
-                std.debug.assert(duped_function_literal == .function_literal);
-                duped_function_literal.function_literal._token.dupe_deinit(alloc);
-
-                return obj.Object{
-                    ._function = obj.Function{
-                        .parameters = duped_function_literal.function_literal.parameters,
-                        .body = duped_function_literal.function_literal.body,
-                        .env = env,
-                    },
-                };
-            },
-            .call_expression => |call_fn| {
-                const duped_function = try call_fn.dupe(alloc);
-                defer duped_function.dupe_deinit(alloc);
-                std.debug.assert(duped_function == .call_expression);
-                const duped_call_exp = duped_function.call_expression;
-
-                const node_call_exp = ast.Node{ .expression = duped_call_exp.function.* };
-                const maybe = try eval(alloc, node_call_exp, env);
-                defer if (maybe) |evaluated| evaluated.deinit(alloc);
-                if (is_error(maybe)) return maybe;
-
-                const args = try evalExpressions(alloc, duped_call_exp.arguments, env);
-                defer {
-                    for (args) |arg| {
-                        arg.deinit(alloc);
-                    }
-                    alloc.free(args);
-                }
-                if (args.len == 1 and is_error(args[0])) return args[0];
-
-                return applyFunction(alloc, maybe.?, args);
-            },
+            .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
+            .call_expression => |call_fn| try evalCallExpression(alloc, call_fn, env),
         },
     };
 }
@@ -171,9 +123,9 @@ fn evalPrefixExpression(
 
 fn evalBangOperatorExpression(right: obj.Object) obj.Object {
     return switch (right) {
-        .boolean => |b| if (b.value) FALSE else TRUE,
-        ._null => TRUE,
-        else => FALSE,
+        .boolean => |b| if (b.value) obj.FALSE else obj.TRUE,
+        ._null => obj.TRUE,
+        else => obj.FALSE,
     };
 }
 
@@ -197,9 +149,9 @@ fn evalInfixOperatorExpression(
         return evalIntegerInfixExpression(alloc, operator, left.integer, right.integer);
     } else if (left == .boolean and right == .boolean) {
         if (std.mem.eql(u8, "==", operator)) {
-            return if (left.boolean.value == right.boolean.value) TRUE else FALSE;
+            return if (left.boolean.value == right.boolean.value) obj.TRUE else obj.FALSE;
         } else if (std.mem.eql(u8, "!=", operator)) {
-            return if (left.boolean.value != right.boolean.value) TRUE else FALSE;
+            return if (left.boolean.value != right.boolean.value) obj.TRUE else obj.FALSE;
         }
     } else if (!left.eql(right)) {
         return new_error(
@@ -226,15 +178,15 @@ fn evalIntegerInfixExpression(
         '-' => obj.Object{ .integer = obj.Integer{ .value = left.value - right.value } },
         '*' => obj.Object{ .integer = obj.Integer{ .value = left.value * right.value } },
         '/' => obj.Object{ .integer = obj.Integer{ .value = @divTrunc(left.value, right.value) } },
-        '<' => if (left.value < right.value) TRUE else FALSE,
-        '>' => if (left.value > right.value) TRUE else FALSE,
-        else => NULL,
+        '<' => if (left.value < right.value) obj.TRUE else obj.FALSE,
+        '>' => if (left.value > right.value) obj.TRUE else obj.FALSE,
+        else => obj.NULL,
     };
     if (std.mem.eql(u8, "==", operator)) {
-        return if (left.value == right.value) TRUE else FALSE;
+        return if (left.value == right.value) obj.TRUE else obj.FALSE;
     }
     if (std.mem.eql(u8, "!=", operator)) {
-        return if (left.value != right.value) TRUE else FALSE;
+        return if (left.value != right.value) obj.TRUE else obj.FALSE;
     }
     return new_error(
         alloc,
@@ -259,7 +211,7 @@ fn evalIfExpression(
         const stmt = ast.Statement{ .block_statement = alt.* };
         return try eval(alloc, ast.Node{ .statement = stmt }, env);
     }
-    return NULL;
+    return obj.NULL;
 }
 
 fn isTruthy(maybe_object: ?obj.Object) bool {
@@ -313,6 +265,73 @@ fn eval_identifier(
     return new_error(alloc, "identifier not found: {s}", .{ident.value});
 }
 
+fn evalFunctionLiteral(
+    alloc: Allocator,
+    function_literal: ast.FunctionLiteral,
+    env: *Environment,
+) EvalError!obj.Object {
+    var duped_array_list = std.ArrayListUnmanaged(ast.Identifier).empty;
+    errdefer {
+        for (duped_array_list.items) |duped_param| duped_param.dupe_deinit(alloc);
+        duped_array_list.deinit(alloc);
+    }
+
+    for (function_literal.parameters) |param| {
+        const duped_param = try param.dupe(alloc);
+        errdefer duped_param.dupe_deinit(alloc);
+        std.debug.assert(duped_param == .identifier);
+        try duped_array_list.append(alloc, duped_param.identifier);
+    }
+
+    const duped_parameters = try duped_array_list.toOwnedSlice(alloc);
+    errdefer {
+        for (duped_parameters) |duped_param| duped_param.dupe_deinit(alloc);
+        alloc.free(duped_parameters);
+    }
+
+    const duped_body = try function_literal.body.dupe(alloc);
+    // errdefer duped_body.dupe_deinit(alloc);
+    std.debug.assert(duped_body == .block_statement);
+
+    return obj.Object{
+        ._function = obj.Function{
+            .parameters = duped_parameters,
+            .body = duped_body.block_statement,
+            .env = env,
+        },
+    };
+}
+
+fn evalCallExpression(
+    alloc: Allocator,
+    call_fn: ast.CallExpression,
+    env: *Environment,
+) EvalError!?obj.Object {
+    const duped_function = try call_fn.dupe(alloc);
+    defer duped_function.dupe_deinit(alloc);
+    std.debug.assert(duped_function == .call_expression);
+    const duped_call_exp = duped_function.call_expression;
+
+    const node_call_exp = ast.Node{ .expression = duped_call_exp.function.* };
+    // Either Identifier or FunctionLiteral
+    // Missing Identifier returns an error, FunctionLiteral never returns null
+    const evaluated = (try eval(alloc, node_call_exp, env)).?;
+    if (is_error(evaluated)) return evaluated;
+    defer evaluated.deinit(alloc);
+
+    const args = try evalExpressions(alloc, duped_call_exp.arguments, env);
+    defer {
+        for (args) |arg| arg.deinit(alloc);
+        alloc.free(args);
+    }
+    if (args.len == 1 and is_error(args[0])) return args[0];
+
+    if (evaluated != ._function) {
+        return try new_error(alloc, "not a function: {}", .{evaluated});
+    }
+    return applyFunction(alloc, evaluated._function, args);
+}
+
 fn evalExpressions(
     alloc: Allocator,
     exps: []const ast.Expression,
@@ -335,7 +354,7 @@ fn evalExpressions(
             return try evaluateds.toOwnedSlice(alloc);
         }
 
-        try evaluateds.append(alloc, evaluated);
+        try evaluateds.append(alloc, evaluated); // fail_index 39 fails here
     }
 
     return try evaluateds.toOwnedSlice(alloc);
@@ -343,50 +362,46 @@ fn evalExpressions(
 
 fn applyFunction(
     alloc: Allocator,
-    func: obj.Object,
+    function: obj.Function,
     arguments: []const obj.Object,
 ) EvalError!?obj.Object {
-    if (func != ._function) {
-        return try new_error(alloc, "not a function: {}", .{func});
-    }
-    const function = func._function;
-
     const node = ast.Node{ .statement = ast.Statement{ .block_statement = function.body } };
 
-    var extended_environment = try extendFunctionEnv(function, arguments);
-    defer extended_environment.deinit();
-
-    const evaluated = try eval(alloc, node, &extended_environment);
-    return unwrapReturnValue(alloc, evaluated);
-}
-
-fn extendFunctionEnv(function: obj.Function, arguments: []const obj.Object) !Environment {
-    var inner_env = Environment{
+    var extended_environment = Environment{
         .alloc = function.env.alloc,
         .store = .empty,
         .outer = function.env,
     };
-    errdefer inner_env.deinit();
+    var is_function_eval = false;
+    defer if (!is_function_eval) extended_environment.deinit();
 
     for (function.parameters, 0..) |param, i| {
-        try inner_env.set(param.value, arguments[i]);
+        try extended_environment.set(param.value, arguments[i]);
     }
+    const duped_env = try function.env.alloc.create(Environment);
+    defer if (!is_function_eval) function.env.alloc.destroy(duped_env);
 
-    return inner_env;
-}
+    duped_env.* = extended_environment;
 
-fn unwrapReturnValue(alloc: Allocator, maybe_object: ?obj.Object) ?obj.Object {
-    if (maybe_object) |object| {
-        if (object == .return_value) {
-            if (object.return_value.value) |val| {
-                const temp = val.*;
-                alloc.destroy(val);
-                return temp;
-            }
-            return null;
+    const maybe_evaluated = try eval(alloc, node, duped_env);
+    if (maybe_evaluated) |object| {
+        switch (object) {
+            .return_value => |ret_val| {
+                if (ret_val.value) |val| {
+                    const temp = val.*;
+                    alloc.destroy(val);
+                    return temp;
+                }
+                return null;
+            },
+            ._function => {
+                is_function_eval = true;
+                return maybe_evaluated;
+            },
+            else => {},
         }
     }
-    return maybe_object;
+    return maybe_evaluated;
 }
 
 // Test Suite
@@ -422,6 +437,9 @@ test "Out of Memory" {
         "let identity = fn(x) { x } ; identity(5);",
         "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));",
         "fn(x) { x; }(5)",
+        \\let newAdder = fn(x) { fn(y) { x + y }; };
+        \\let addTwo = newAdder(2);
+        \\addTwo(1);
     };
 
     for (inputs) |input| {
@@ -686,6 +704,11 @@ test "Function Application" {
         .{ .input = "let add = fn(x, y) { x + y; }; add(5, 5);", .expected = 10 },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));", .expected = 20 },
         .{ .input = "fn(x) { x; }(5)", .expected = 5 },
+        .{ .input = 
+        \\let newAdder = fn(x) { fn(y) { x + y }; };
+        \\let addTwo = newAdder(2);
+        \\addTwo(1);
+        , .expected = 3 },
     };
 
     for (eval_tests) |eval_test| {
@@ -705,27 +728,6 @@ test "Function Application" {
         try testIntegerObject(eval_test.expected, actual.?);
     }
 }
-
-// test "Nested functions" {
-//     const input =
-//         \\let newAdder = fn(x) { fn(y) { x + y} };
-//         \\let addTwo = newAdder(2);
-//         \\addTwo(3);
-//     ;
-//     var env = Environment.init(testing.allocator);
-//     defer env.deinit();
-//
-//     var lexer = Lexer.init(input);
-//     var parser = try Parser.init(&lexer, testing.allocator);
-//     defer parser.deinit(testing.allocator);
-//     const program = try parser.parseProgram(testing.allocator);
-//     defer program.parser_deinit(testing.allocator);
-//
-//     const node = ast.Node{ .program = program };
-//     const actual = try eval(testing.allocator, node, &env);
-//     defer actual.?.deinit(testing.allocator);
-//     try testIntegerObject(5, actual.?);
-// }
 
 // Test Helpers
 
