@@ -1,12 +1,10 @@
 const std = @import("std");
 const testing = std.testing;
-
 const Allocator = std.mem.Allocator;
+const AnyWriter = std.io.AnyWriter;
 
 const ast = @import("ast.zig");
 const Environment = @import("environment.zig").Environment;
-
-const AnyWriter = std.io.AnyWriter;
 
 const ObjectType = []const u8;
 
@@ -27,7 +25,7 @@ pub const Object = union(enum) {
     _null: Null,
     return_value: ReturnValue,
     _error: Error,
-    _function: Function,
+    function: Function,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
@@ -36,7 +34,7 @@ pub const Object = union(enum) {
             ._null => NULL_OBJ,
             .return_value => RETURN_VALUE_OBJ,
             ._error => ERROR_OBJ,
-            ._function => FUNCTION_OBJ,
+            .function => FUNCTION_OBJ,
         };
     }
 
@@ -226,7 +224,7 @@ pub const Function = struct {
         }
 
         return Object{
-            ._function = Function{
+            .function = Function{
                 .parameters = try duped_parameters.toOwnedSlice(alloc),
                 .body = duped_body.block_statement,
                 .env = duped_env_ptr,

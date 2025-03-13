@@ -3,10 +3,10 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
 const ast = @import("ast.zig");
+const Environment = @import("environment.zig").Environment;
 const Lexer = @import("lexer.zig").Lexer;
 const obj = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
-const Environment = @import("environment.zig").Environment;
 const Token = @import("token.zig").Token;
 
 const EvalError = Allocator.Error || std.fmt.AllocPrintError;
@@ -294,7 +294,7 @@ fn evalFunctionLiteral(
     std.debug.assert(duped_body == .block_statement);
 
     return obj.Object{
-        ._function = obj.Function{
+        .function = obj.Function{
             .parameters = duped_parameters,
             .body = duped_body.block_statement,
             .env = env,
@@ -326,10 +326,10 @@ fn evalCallExpression(
     }
     if (args.len == 1 and is_error(args[0])) return args[0];
 
-    if (evaluated != ._function) {
+    if (evaluated != .function) {
         return try new_error(alloc, "not a function: {}", .{evaluated});
     }
-    return applyFunction(alloc, evaluated._function, args);
+    return applyFunction(alloc, evaluated.function, args);
 }
 
 fn evalExpressions(
@@ -394,7 +394,7 @@ fn applyFunction(
                 }
                 return null;
             },
-            ._function => {
+            .function => {
                 is_function_eval = true;
                 return maybe_evaluated;
             },
@@ -569,11 +569,26 @@ test "Return Statements" {
         \\  return 1;
         \\}
         , .expected = 10 },
+        .{ .input = 
+        \\let f = fn(x) {
+        \\  return x;
+        \\  x + 10;
+        \\};
+        \\f(10);
+        , .expected = 10 },
+        .{ .input = 
+        \\let f = fn(x) {
+        \\  let result = x + 10;
+        \\  return result;
+        \\  return 10;
+        \\};
+        \\f(10);
+        , .expected = 20 },
     };
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
 
     for (eval_tests) |eval_test| {
+        var env = Environment.init(testing.allocator);
+        defer env.deinit();
         const evaluated = try testEval(eval_test.input, testing.allocator, &env);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
@@ -673,13 +688,10 @@ test "Function Object" {
     defer program.parser_deinit(testing.allocator);
 
     const node = ast.Node{ .program = program };
-    const evaluated = try eval(testing.allocator, node, &env);
-    if (evaluated.? != ._function) {
-        std.debug.print("object is not Function. got={?any}\n", .{evaluated});
-        return error.TestExpectedEqual;
-    }
+    const evaluated = (try eval(testing.allocator, node, &env)).?;
 
-    const func = evaluated.?._function;
+    try testing.expect(evaluated == .function);
+    const func = evaluated.function;
     defer func.deinit(testing.allocator);
 
     try testing.expectEqual(1, func.parameters.len);
@@ -727,6 +739,37 @@ test "Function Application" {
 
         try testIntegerObject(eval_test.expected, actual.?);
     }
+}
+
+test "Enclosing Environments" {
+    const input =
+        \\let first = 10;
+        \\let second = 10;
+        \\let third = 10;
+        \\
+        \\let ourFunction = fn(first) {
+        \\  let second = 20;
+        \\
+        \\  first + second + third;
+        \\};
+        \\
+        \\ourFunction(20) + first + second;
+    ;
+
+    var env = Environment.init(testing.allocator);
+    defer env.deinit();
+
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit(testing.allocator);
+    const program = try parser.parseProgram(testing.allocator);
+    defer program.parser_deinit(testing.allocator);
+
+    const node = ast.Node{ .program = program };
+    const actual = try eval(testing.allocator, node, &env);
+    defer actual.?.deinit(testing.allocator);
+
+    try testIntegerObject(70, actual.?);
 }
 
 // Test Helpers
