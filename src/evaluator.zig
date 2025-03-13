@@ -469,11 +469,9 @@ test "Integer Expression" {
         .{ .input = "3 * (3 * 3) + 10", .expected = 37 },
         .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
     };
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator, &env);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
     }
@@ -501,11 +499,9 @@ test "Boolean Expression" {
         .{ .input = "(1 > 2) == true", .expected = false },
         .{ .input = "(1 > 2) == false", .expected = true },
     };
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator, &env);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testBooleanObject(eval_test.expected, evaluated.?);
     }
@@ -520,11 +516,9 @@ test "Bang Operator" {
         .{ .input = "!!false", .expected = false },
         .{ .input = "!!5", .expected = true },
     };
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator, &env);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testBooleanObject(eval_test.expected, evaluated.?);
     }
@@ -540,11 +534,9 @@ test "If Else Expressions" {
         .{ .input = "if (1 > 2) { 10 } else { 20 }", .expected = 20 },
         .{ .input = "if (1 < 2) { 10 } else { 20 }", .expected = 10 },
     };
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator, &env);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         if (eval_test.expected) |expected| {
             try testIntegerObject(expected, evaluated.?);
@@ -587,9 +579,7 @@ test "Return Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        var env = Environment.init(testing.allocator);
-        defer env.deinit();
-        const evaluated = try testEval(eval_test.input, testing.allocator, &env);
+        const evaluated = try testEval(eval_test.input, testing.allocator);
         defer evaluated.?.deinit(testing.allocator);
         try testIntegerObject(eval_test.expected, evaluated.?);
     }
@@ -644,10 +634,7 @@ test "Error Handling" {
     };
 
     for (eval_tests) |eval_test| {
-        var env = Environment.init(testing.allocator);
-        defer env.deinit();
-
-        const maybe = try testEval(eval_test.input, testing.allocator, &env);
+        const maybe = try testEval(eval_test.input, testing.allocator);
         const evaluated = maybe orelse return error.TestExpectedEqual;
         defer evaluated.deinit(testing.allocator);
 
@@ -669,15 +656,14 @@ test "Let Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        var env = Environment.init(testing.allocator);
-        defer env.deinit();
-        const actual = try testEval(eval_test.input, testing.allocator, &env);
-        try testIntegerObject(eval_test.expected, actual.?);
+        const actual = (try testEval(eval_test.input, testing.allocator)).?;
+        try testIntegerObject(eval_test.expected, actual);
     }
 }
 
 test "Function Object" {
     const input = "fn(x) { x + 2 };";
+
     var env = Environment.init(testing.allocator);
     defer env.deinit();
 
@@ -689,22 +675,22 @@ test "Function Object" {
 
     const node = ast.Node{ .program = program };
     const evaluated = (try eval(testing.allocator, node, &env)).?;
+    defer evaluated.deinit(testing.allocator);
 
     try testing.expect(evaluated == .function);
-    const func = evaluated.function;
-    defer func.deinit(testing.allocator);
+    const function = evaluated.function;
 
-    try testing.expectEqual(1, func.parameters.len);
+    try testing.expectEqual(1, function.parameters.len);
 
     var array_list = std.ArrayListUnmanaged(u8).empty;
     defer array_list.deinit(testing.allocator);
     const writer = array_list.writer(testing.allocator).any();
 
-    try func.parameters[0].string(writer);
+    try function.parameters[0].string(writer);
     try testing.expectEqualStrings("x", array_list.items);
     array_list.clearRetainingCapacity();
 
-    try func.body.string(writer);
+    try function.body.string(writer);
     try testing.expectEqualStrings("(x + 2)", array_list.items);
 }
 
@@ -724,20 +710,9 @@ test "Function Application" {
     };
 
     for (eval_tests) |eval_test| {
-        var env = Environment.init(testing.allocator);
-        defer env.deinit();
-
-        var lexer = Lexer.init(eval_test.input);
-        var parser = try Parser.init(&lexer, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
-
-        const node = ast.Node{ .program = program };
-        const actual = try eval(testing.allocator, node, &env);
-        defer actual.?.deinit(testing.allocator);
-
-        try testIntegerObject(eval_test.expected, actual.?);
+        const actual = (try testEval(eval_test.input, testing.allocator)).?;
+        defer actual.deinit(testing.allocator);
+        try testIntegerObject(eval_test.expected, actual);
     }
 }
 
@@ -756,25 +731,18 @@ test "Enclosing Environments" {
         \\ourFunction(20) + first + second;
     ;
 
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
+    const actual = (try testEval(input, testing.allocator)).?;
+    defer actual.deinit(testing.allocator);
 
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
-
-    const node = ast.Node{ .program = program };
-    const actual = try eval(testing.allocator, node, &env);
-    defer actual.?.deinit(testing.allocator);
-
-    try testIntegerObject(70, actual.?);
+    try testIntegerObject(70, actual);
 }
 
 // Test Helpers
 
-fn testEval(input: []const u8, alloc: Allocator, env: *Environment) !?obj.Object {
+fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
+    var env = Environment.init(alloc);
+    defer env.deinit();
+
     var lexer = Lexer.init(input);
     var parser = try Parser.init(&lexer, alloc);
     defer parser.deinit(alloc);
@@ -782,7 +750,7 @@ fn testEval(input: []const u8, alloc: Allocator, env: *Environment) !?obj.Object
     defer program.parser_deinit(alloc);
 
     const node = ast.Node{ .program = program };
-    return try eval(alloc, node, env);
+    return try eval(alloc, node, &env);
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
@@ -809,9 +777,16 @@ fn testNullObject(object: obj.Object) !void {
 }
 
 fn testOutOfMemory(allocator: Allocator, input: []const u8) !void {
-    var env = Environment.init(allocator);
+    var env = Environment.init(testing.allocator);
     defer env.deinit();
 
-    const maybe = try testEval(input, allocator, &env);
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit(testing.allocator);
+    const program = try parser.parseProgram(testing.allocator);
+    defer program.parser_deinit(testing.allocator);
+
+    const node = ast.Node{ .program = program };
+    const maybe = try eval(testing.allocator, node, &env);
     if (maybe) |actual| actual.deinit(allocator);
 }
