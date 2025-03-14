@@ -23,10 +23,13 @@ pub const Environment = struct {
 
     pub fn dupe(self: *const Environment) Allocator.Error!Environment {
         var duped_env = Environment{ .alloc = self.alloc, .store = .empty, .outer = self.outer };
+        errdefer duped_env.deinit();
 
         var iter = self.store.iterator();
         while (iter.next()) |entry| {
-            try duped_env.set(entry.key_ptr.*, entry.value_ptr.*);
+            const duped_value = try entry.value_ptr.dupe(duped_env.alloc);
+            errdefer duped_value.deinit(duped_env.alloc);
+            try duped_env.set(entry.key_ptr.*, duped_value);
         }
 
         return duped_env;
@@ -42,10 +45,7 @@ pub const Environment = struct {
         const key = try self.alloc.dupe(u8, name);
         errdefer self.alloc.free(key);
 
-        const duped_value = try value.dupe(self.alloc);
-        errdefer duped_value.deinit(self.alloc);
-
-        try self.store.put(self.alloc, key, duped_value);
+        try self.store.put(self.alloc, key, value);
     }
 
     pub fn isRootEnvironment(self: *const Environment) bool {

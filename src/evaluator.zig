@@ -15,64 +15,19 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
     return switch (parent_node) {
         .program => |prog| try evalProgram(alloc, prog.statements, env),
         .statement => |stmt| switch (stmt) {
-            .let_statement => |let_stmt| {
-                const maybe = try eval(alloc, ast.Node{ .expression = let_stmt.value }, env);
-                if (is_error(maybe)) return maybe;
-
-                const let_value = maybe orelse return null;
-                defer let_value.deinit(alloc);
-                try env.set(let_stmt.name.value, let_value);
-                return null;
-            },
+            .let_statement => |let_stmt| try evalLetStatement(alloc, let_stmt, env),
             .expression_statement => |exp_stmt| {
                 const child_node = ast.Node{ .expression = exp_stmt.expression };
                 return try eval(alloc, child_node, env);
             },
             .block_statement => |blk_stmt| try evalBlockStatement(alloc, blk_stmt, env),
-            .return_statement => |ret_stmt| {
-                const maybe_object = try eval(
-                    alloc,
-                    ast.Node{ .expression = ret_stmt.return_value },
-                    env,
-                );
-                errdefer if (maybe_object) |object| object.deinit(alloc);
-                if (is_error(maybe_object)) return maybe_object;
-
-                var value: ?*obj.Object = null;
-                if (maybe_object) |object| {
-                    value = try alloc.create(obj.Object);
-                    value.?.* = object;
-                }
-                return obj.Object{ .return_value = obj.ReturnValue{ .value = value } };
-            },
+            .return_statement => |ret_stmt| try evalReturnStatement(alloc, ret_stmt, env),
         },
         .expression => |exp| switch (exp) {
-            .identifier => |*ident| try eval_identifier(alloc, ident, env),
+            .identifier => |ident| try eval_identifier(alloc, ident, env),
             .integer_literal => |int| obj.Object{ .integer = obj.Integer{ .value = int.value } },
-            .prefix_expression => |prefix| {
-                const maybe_right = try eval(
-                    alloc,
-                    ast.Node{ .expression = prefix.right.* },
-                    env,
-                );
-                if (is_error(maybe_right)) return maybe_right;
-
-                const right = maybe_right orelse return null;
-                return try evalPrefixExpression(alloc, prefix.operator, right);
-            },
-            .infix_expression => |infix| {
-                const left_node = ast.Node{ .expression = infix.left.* };
-                const left_obj = try eval(alloc, left_node, env) orelse return null;
-                if (is_error(left_obj)) return left_obj;
-                errdefer left_obj.deinit(alloc);
-
-                const right_node = ast.Node{ .expression = infix.right.* };
-                const right_obj = try eval(alloc, right_node, env) orelse return null;
-                if (is_error(right_obj)) return right_obj;
-                errdefer right_obj.deinit(alloc);
-
-                return try evalInfixOperatorExpression(alloc, infix.operator, left_obj, right_obj);
-            },
+            .prefix_expression => |prefix| try evalPrefixExpression(alloc, prefix, env),
+            .infix_expression => |infix| try evalInfixOperatorExpression(alloc, infix, env),
             .boolean_expression => |boolean| if (boolean.value) obj.TRUE else obj.FALSE,
             .if_expression => |if_exp| try evalIfExpression(alloc, if_exp, env),
             .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
@@ -108,17 +63,71 @@ fn evalProgram(
     return maybe_result;
 }
 
+fn evalLetStatement(
+    alloc: Allocator,
+    let_stmt: ast.LetStatement,
+    env: *Environment,
+) EvalError!?obj.Object {
+    const child_node = ast.Node{ .expression = let_stmt.value };
+    const let_value = try eval(alloc, child_node, env) orelse return null;
+    if (is_error(let_value)) return let_value;
+    errdefer let_value.deinit(alloc);
+
+    try env.set(let_stmt.name.value, let_value);
+    return null;
+}
+
+fn evalBlockStatement(
+    alloc: Allocator,
+    block: ast.BlockStatement,
+    env: *Environment,
+) EvalError!?obj.Object {
+    var maybe: ?obj.Object = null;
+
+    for (block.statements) |stmt| {
+        maybe = try eval(alloc, ast.Node{ .statement = stmt }, env);
+        if (maybe) |result| switch (result) {
+            .return_value, ._error => return result,
+            else => {},
+        };
+    }
+
+    return maybe;
+}
+
+fn evalReturnStatement(
+    alloc: Allocator,
+    stmt: ast.ReturnStatement,
+    env: *Environment,
+) EvalError!?obj.Object {
+    const child_node = ast.Node{ .expression = stmt.return_value };
+    const object = try eval(alloc, child_node, env) orelse
+        return obj.Object{ .return_value = obj.ReturnValue{ .value = null } };
+    if (is_error(object)) return object;
+    errdefer object.deinit(alloc);
+
+    const value = try alloc.create(obj.Object);
+    value.* = object;
+    return obj.Object{ .return_value = obj.ReturnValue{ .value = value } };
+}
+
 fn evalPrefixExpression(
     alloc: Allocator,
-    operator: []const u8,
-    right: obj.Object,
-) EvalError!obj.Object {
-    if (operator.len == 1) switch (operator[0]) {
+    prefix: ast.PrefixExpression,
+    env: *Environment,
+) EvalError!?obj.Object {
+    const child_node = ast.Node{ .expression = prefix.right.* };
+    const right = try eval(alloc, child_node, env) orelse return null;
+    if (is_error(right)) return right;
+    // TODO how was this never caught?
+    // errdefer right.deinit(alloc);
+
+    if (prefix.operator.len == 1) switch (prefix.operator[0]) {
         '!' => return evalBangOperatorExpression(right),
-        '-' => return evalMinusPrefixOperatorExperssion(alloc, right),
+        '-' => return try evalMinusPrefixOperatorExperssion(alloc, right),
         else => {},
     };
-    return new_error(alloc, "unknown operator: {s}{s}", .{ operator, right._type() });
+    return try new_error(alloc, "unknown operator: {s}{s}", .{ prefix.operator, right._type() });
 }
 
 fn evalBangOperatorExpression(right: obj.Object) obj.Object {
@@ -129,42 +138,45 @@ fn evalBangOperatorExpression(right: obj.Object) obj.Object {
     };
 }
 
-fn evalMinusPrefixOperatorExperssion(
-    alloc: Allocator,
-    right: obj.Object,
-) EvalError!obj.Object {
-    if (right != .integer) {
-        return new_error(alloc, "unknown operator: -{s}", .{right._type()});
-    }
-    return obj.Object{ .integer = obj.Integer{ .value = -right.integer.value } };
+fn evalMinusPrefixOperatorExperssion(alloc: Allocator, right: obj.Object) EvalError!obj.Object {
+    return switch (right) {
+        .integer => obj.Object{ .integer = obj.Integer{ .value = -right.integer.value } },
+        else => try new_error(alloc, "unknown operator: -{s}", .{right._type()}),
+    };
 }
 
 fn evalInfixOperatorExpression(
     alloc: Allocator,
-    operator: []const u8,
-    left: obj.Object,
-    right: obj.Object,
-) EvalError!obj.Object {
-    if (left == .integer and right == .integer) {
-        return evalIntegerInfixExpression(alloc, operator, left.integer, right.integer);
-    } else if (left == .boolean and right == .boolean) {
-        if (std.mem.eql(u8, "==", operator)) {
-            return if (left.boolean.value == right.boolean.value) obj.TRUE else obj.FALSE;
-        } else if (std.mem.eql(u8, "!=", operator)) {
-            return if (left.boolean.value != right.boolean.value) obj.TRUE else obj.FALSE;
+    infix: ast.InfixExpression,
+    env: *Environment,
+) EvalError!?obj.Object {
+    const left_node = ast.Node{ .expression = infix.left.* };
+    const left_obj = try eval(alloc, left_node, env) orelse return null;
+    if (is_error(left_obj)) return left_obj;
+    errdefer left_obj.deinit(alloc);
+
+    const right_node = ast.Node{ .expression = infix.right.* };
+    const right_obj = try eval(alloc, right_node, env) orelse return null;
+    if (is_error(right_obj)) return right_obj;
+    errdefer right_obj.deinit(alloc);
+
+    const op = infix.operator;
+
+    if (left_obj == .integer and right_obj == .integer) {
+        return try evalIntegerInfixExpression(alloc, op, left_obj.integer, right_obj.integer);
+    } else if (left_obj == .boolean and right_obj == .boolean) {
+        if (std.mem.eql(u8, "==", op)) {
+            return if (left_obj.boolean.value == right_obj.boolean.value) obj.TRUE else obj.FALSE;
+        } else if (std.mem.eql(u8, "!=", op)) {
+            return if (left_obj.boolean.value != right_obj.boolean.value) obj.TRUE else obj.FALSE;
         }
-    } else if (!left.eql(right)) {
-        return new_error(
-            alloc,
-            "type mismatch: {s} {s} {s}",
-            .{ left._type(), operator, right._type() },
-        );
+    } else if (!left_obj.eql(right_obj)) {
+        const fmt = "type mismatch: {s} {s} {s}";
+        return try new_error(alloc, fmt, .{ left_obj._type(), op, right_obj._type() });
     }
-    return new_error(
-        alloc,
-        "unknown operator: {s} {s} {s}",
-        .{ left._type(), operator, right._type() },
-    );
+
+    const fmt = "unknown operator: {s} {s} {s}";
+    return try new_error(alloc, fmt, .{ left_obj._type(), op, right_obj._type() });
 }
 
 fn evalIntegerInfixExpression(
@@ -188,11 +200,9 @@ fn evalIntegerInfixExpression(
     if (std.mem.eql(u8, "!=", operator)) {
         return if (left.value != right.value) obj.TRUE else obj.FALSE;
     }
-    return new_error(
-        alloc,
-        "unknown operator: {s} {s} {s}",
-        .{ obj.INTEGER_OBJ, operator, obj.INTEGER_OBJ },
-    );
+
+    const fmt = "unknown operator: {s} {s} {s}";
+    return new_error(alloc, fmt, .{ obj.INTEGER_OBJ, operator, obj.INTEGER_OBJ });
 }
 
 fn evalIfExpression(
@@ -222,24 +232,6 @@ fn isTruthy(maybe_object: ?obj.Object) bool {
     } else true;
 }
 
-fn evalBlockStatement(
-    alloc: Allocator,
-    block: ast.BlockStatement,
-    env: *Environment,
-) EvalError!?obj.Object {
-    var maybe: ?obj.Object = null;
-
-    for (block.statements) |stmt| {
-        maybe = try eval(alloc, ast.Node{ .statement = stmt }, env);
-        if (maybe) |result| switch (result) {
-            .return_value, ._error => return result,
-            else => {},
-        };
-    }
-
-    return maybe;
-}
-
 fn new_error(
     alloc: Allocator,
     comptime fmt: []const u8,
@@ -255,11 +247,10 @@ fn is_error(maybe_object: ?obj.Object) bool {
 
 fn eval_identifier(
     alloc: Allocator,
-    ident: *const ast.Identifier,
+    ident: ast.Identifier,
     env: *Environment,
 ) EvalError!obj.Object {
-    const maybe = env.get(ident.value);
-    if (maybe) |identifier_value| {
+    if (env.get(ident.value)) |identifier_value| {
         return try identifier_value.dupe(alloc);
     }
     return new_error(alloc, "identifier not found: {s}", .{ident.value});
@@ -344,8 +335,7 @@ fn evalExpressions(
     }
 
     for (exps) |exp| {
-        const maybe_eval = try eval(alloc, ast.Node{ .expression = exp }, env);
-        const evaluated = maybe_eval.?;
+        const evaluated = (try eval(alloc, ast.Node{ .expression = exp }, env)).?;
         errdefer evaluated.deinit(alloc);
 
         if (is_error(evaluated)) {
@@ -471,9 +461,9 @@ test "Integer Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
-        defer evaluated.?.deinit(testing.allocator);
-        try testIntegerObject(eval_test.expected, evaluated.?);
+        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
+        defer evaluated.deinit(testing.allocator);
+        try testIntegerObject(eval_test.expected, evaluated);
     }
 }
 
@@ -501,9 +491,9 @@ test "Boolean Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
-        defer evaluated.?.deinit(testing.allocator);
-        try testBooleanObject(eval_test.expected, evaluated.?);
+        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
+        defer evaluated.deinit(testing.allocator);
+        try testBooleanObject(eval_test.expected, evaluated);
     }
 }
 
@@ -518,9 +508,9 @@ test "Bang Operator" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
-        defer evaluated.?.deinit(testing.allocator);
-        try testBooleanObject(eval_test.expected, evaluated.?);
+        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
+        defer evaluated.deinit(testing.allocator);
+        try testBooleanObject(eval_test.expected, evaluated);
     }
 }
 
@@ -536,12 +526,12 @@ test "If Else Expressions" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
-        defer evaluated.?.deinit(testing.allocator);
+        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
+        defer evaluated.deinit(testing.allocator);
         if (eval_test.expected) |expected| {
-            try testIntegerObject(expected, evaluated.?);
+            try testIntegerObject(expected, evaluated);
         } else {
-            try testNullObject(evaluated.?);
+            try testNullObject(evaluated);
         }
     }
 }
@@ -579,9 +569,9 @@ test "Return Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = try testEval(eval_test.input, testing.allocator);
-        defer evaluated.?.deinit(testing.allocator);
-        try testIntegerObject(eval_test.expected, evaluated.?);
+        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
+        defer evaluated.deinit(testing.allocator);
+        try testIntegerObject(eval_test.expected, evaluated);
     }
 }
 
