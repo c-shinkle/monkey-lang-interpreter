@@ -38,6 +38,52 @@ pub const LT = "<";
 pub const GT = ">";
 pub const EQ = "==";
 pub const NOT_EQ = "!=";
+
+pub const Operator = enum {
+    assign,
+    plus,
+    minus,
+    bang,
+    asterisk,
+    slash,
+    lt,
+    gt,
+    eq,
+    not_eq,
+};
+
+const literals_to_operators = std.StaticStringMap(Operator).initComptime(.{
+    .{ ASSIGN, .assign },
+    .{ PLUS, .plus },
+    .{ MINUS, .minus },
+    .{ BANG, .bang },
+    .{ ASTERISK, .asterisk },
+    .{ SLASH, .slash },
+    .{ LT, .lt },
+    .{ GT, .gt },
+    .{ EQ, .eq },
+    .{ NOT_EQ, .not_eq },
+});
+
+pub fn lookupOperatorLiteral(literal: []const u8) ?Operator {
+    return literals_to_operators.get(literal);
+}
+
+pub fn lookupOperatorEnum(operator: Operator) []const u8 {
+    return switch (operator) {
+        .assign => ASSIGN,
+        .plus => PLUS,
+        .minus => MINUS,
+        .bang => BANG,
+        .asterisk => ASTERISK,
+        .slash => SLASH,
+        .lt => LT,
+        .gt => GT,
+        .eq => EQ,
+        .not_eq => NOT_EQ,
+    };
+}
+
 // Delimiters
 pub const COMMA = ",";
 pub const SEMICOLON = ";";

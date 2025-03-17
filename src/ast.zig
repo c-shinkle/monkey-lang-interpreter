@@ -413,7 +413,7 @@ pub const IntegerLiteral = struct {
 
 pub const PrefixExpression = struct {
     _token: token.Token,
-    operator: []const u8,
+    operator: token.Operator,
     right: *Expression,
 
     pub fn expressionNode(_: *const PrefixExpression) void {}
@@ -424,7 +424,7 @@ pub const PrefixExpression = struct {
 
     pub fn string(self: *const PrefixExpression, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeByte('(');
-        try writer.writeAll(self.operator);
+        try writer.writeAll(token.lookupOperatorEnum(self.operator));
         try self.right.string(writer);
         try writer.writeByte(')');
     }
@@ -437,8 +437,6 @@ pub const PrefixExpression = struct {
     pub fn dupe(self: *const PrefixExpression, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
-        const duped_operator = try alloc.dupe(u8, self.operator);
-        errdefer alloc.free(duped_operator);
 
         const duped_right = try self.right.dupe(alloc);
         errdefer duped_right.dupe_deinit(alloc);
@@ -449,7 +447,7 @@ pub const PrefixExpression = struct {
         return Expression{
             .prefix_expression = PrefixExpression{
                 ._token = duped_token,
-                .operator = duped_operator,
+                .operator = self.operator,
                 .right = duped_right_ptr,
             },
         };
@@ -457,7 +455,6 @@ pub const PrefixExpression = struct {
 
     pub fn dupe_deinit(self: *const PrefixExpression, alloc: Allocator) void {
         self._token.dupe_deinit(alloc);
-        alloc.free(self.operator);
         self.right.dupe_deinit(alloc);
         alloc.destroy(self.right);
     }
@@ -466,7 +463,7 @@ pub const PrefixExpression = struct {
 pub const InfixExpression = struct {
     _token: token.Token,
     left: *Expression,
-    operator: []const u8,
+    operator: token.Operator,
     right: *Expression,
 
     pub fn expressionNode(_: *const InfixExpression) void {}
@@ -479,7 +476,7 @@ pub const InfixExpression = struct {
         try writer.writeByte('(');
         try self.left.string(writer);
         try writer.writeByte(' ');
-        try writer.writeAll(self.operator);
+        try writer.writeAll(token.lookupOperatorEnum(self.operator));
         try writer.writeByte(' ');
         try self.right.string(writer);
         try writer.writeByte(')');
@@ -503,9 +500,6 @@ pub const InfixExpression = struct {
         errdefer alloc.destroy(duped_left_ptr);
         duped_left_ptr.* = duped_left;
 
-        const duped_operator = try alloc.dupe(u8, self.operator);
-        errdefer alloc.free(duped_operator);
-
         const duped_right = try self.right.dupe(alloc);
         errdefer duped_right.dupe_deinit(alloc);
         const duped_right_ptr = try alloc.create(Expression);
@@ -516,7 +510,7 @@ pub const InfixExpression = struct {
             .infix_expression = InfixExpression{
                 ._token = duped_token,
                 .left = duped_left_ptr,
-                .operator = duped_operator,
+                .operator = self.operator,
                 .right = duped_right_ptr,
             },
         };
@@ -527,8 +521,6 @@ pub const InfixExpression = struct {
 
         self.left.dupe_deinit(alloc);
         alloc.destroy(self.left);
-
-        alloc.free(self.operator);
 
         self.right.dupe_deinit(alloc);
         alloc.destroy(self.right);
@@ -960,7 +952,7 @@ test "Expression Out of Memory" {
                     ._type = token.BANG,
                     .literal = "!false",
                 },
-                .operator = "!",
+                .operator = token.Operator.bang,
                 .right = &prefix_right,
             },
         },
@@ -970,7 +962,7 @@ test "Expression Out of Memory" {
                     ._type = token.PLUS,
                     .literal = "+",
                 },
-                .operator = "+",
+                .operator = token.Operator.plus,
                 .left = &infix_left,
                 .right = &infix_right,
             },
@@ -1158,7 +1150,7 @@ test "Expression deinit" {
                     ._type = token.BANG,
                     .literal = "!false",
                 },
-                .operator = "!",
+                .operator = token.Operator.bang,
                 .right = &prefix_right,
             },
         },
@@ -1168,7 +1160,7 @@ test "Expression deinit" {
                     ._type = token.PLUS,
                     .literal = "+",
                 },
-                .operator = "+",
+                .operator = token.Operator.plus,
                 .left = &infix_left,
                 .right = &infix_right,
             },

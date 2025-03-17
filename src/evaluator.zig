@@ -7,7 +7,7 @@ const Environment = @import("environment.zig").Environment;
 const Lexer = @import("lexer.zig").Lexer;
 const obj = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
-const Token = @import("token.zig").Token;
+const token = @import("token.zig");
 
 const EvalError = Allocator.Error || std.fmt.AllocPrintError;
 
@@ -122,12 +122,14 @@ fn evalPrefixExpression(
     // TODO how was this never caught?
     // errdefer right.deinit(alloc);
 
-    if (prefix.operator.len == 1) switch (prefix.operator[0]) {
-        '!' => return evalBangOperatorExpression(right),
-        '-' => return try evalMinusPrefixOperatorExperssion(alloc, right),
-        else => {},
+    return switch (prefix.operator) {
+        .bang => evalBangOperatorExpression(right),
+        .minus => try evalMinusPrefixOperatorExperssion(alloc, right),
+        else => blk: {
+            const args = .{ token.lookupOperatorEnum(prefix.operator), right._type() };
+            break :blk try new_error(alloc, "unknown operator: {s}{s}", args);
+        },
     };
-    return try new_error(alloc, "unknown operator: {s}{s}", .{ prefix.operator, right._type() });
 }
 
 fn evalBangOperatorExpression(right: obj.Object) obj.Object {
@@ -165,44 +167,55 @@ fn evalInfixOperatorExpression(
     if (left_obj == .integer and right_obj == .integer) {
         return try evalIntegerInfixExpression(alloc, op, left_obj.integer, right_obj.integer);
     } else if (left_obj == .boolean and right_obj == .boolean) {
-        if (std.mem.eql(u8, "==", op)) {
-            return if (left_obj.boolean.value == right_obj.boolean.value) obj.TRUE else obj.FALSE;
-        } else if (std.mem.eql(u8, "!=", op)) {
-            return if (left_obj.boolean.value != right_obj.boolean.value) obj.TRUE else obj.FALSE;
-        }
+        return try evalBooleanInfixExpression(alloc, op, left_obj.boolean, right_obj.boolean);
     } else if (!left_obj.eql(right_obj)) {
-        const fmt = "type mismatch: {s} {s} {s}";
-        return try new_error(alloc, fmt, .{ left_obj._type(), op, right_obj._type() });
+        const args = .{ left_obj._type(), token.lookupOperatorEnum(op), right_obj._type() };
+        return try new_error(alloc, "type mismatch: {s} {s} {s}", args);
     }
 
-    const fmt = "unknown operator: {s} {s} {s}";
-    return try new_error(alloc, fmt, .{ left_obj._type(), op, right_obj._type() });
+    const args = .{ left_obj._type(), token.lookupOperatorEnum(op), right_obj._type() };
+    return try new_error(alloc, "unknown operator: {s} {s} {s}", args);
 }
 
 fn evalIntegerInfixExpression(
     alloc: Allocator,
-    operator: []const u8,
+    operator: token.Operator,
     left: obj.Integer,
     right: obj.Integer,
 ) EvalError!obj.Object {
-    if (operator.len == 1) return switch (operator[0]) {
-        '+' => obj.Object{ .integer = obj.Integer{ .value = left.value + right.value } },
-        '-' => obj.Object{ .integer = obj.Integer{ .value = left.value - right.value } },
-        '*' => obj.Object{ .integer = obj.Integer{ .value = left.value * right.value } },
-        '/' => obj.Object{ .integer = obj.Integer{ .value = @divTrunc(left.value, right.value) } },
-        '<' => if (left.value < right.value) obj.TRUE else obj.FALSE,
-        '>' => if (left.value > right.value) obj.TRUE else obj.FALSE,
-        else => obj.NULL,
+    return switch (operator) {
+        .plus => obj.Object{ .integer = obj.Integer{ .value = left.value + right.value } },
+        .minus => obj.Object{ .integer = obj.Integer{ .value = left.value - right.value } },
+        .asterisk => obj.Object{ .integer = obj.Integer{ .value = left.value * right.value } },
+        .slash => obj.Object{
+            .integer = obj.Integer{ .value = @divTrunc(left.value, right.value) },
+        },
+        .lt => if (left.value < right.value) obj.TRUE else obj.FALSE,
+        .gt => if (left.value > right.value) obj.TRUE else obj.FALSE,
+        .eq => if (left.value == right.value) obj.TRUE else obj.FALSE,
+        .not_eq => if (left.value != right.value) obj.TRUE else obj.FALSE,
+        else => try new_error(
+            alloc,
+            "unknown operator: {s} {any} {s}",
+            .{ obj.INTEGER_OBJ, operator, obj.INTEGER_OBJ },
+        ),
     };
-    if (std.mem.eql(u8, "==", operator)) {
-        return if (left.value == right.value) obj.TRUE else obj.FALSE;
-    }
-    if (std.mem.eql(u8, "!=", operator)) {
-        return if (left.value != right.value) obj.TRUE else obj.FALSE;
-    }
+}
 
-    const fmt = "unknown operator: {s} {s} {s}";
-    return new_error(alloc, fmt, .{ obj.INTEGER_OBJ, operator, obj.INTEGER_OBJ });
+fn evalBooleanInfixExpression(
+    alloc: Allocator,
+    operator: token.Operator,
+    left: obj.Boolean,
+    right: obj.Boolean,
+) EvalError!obj.Object {
+    return switch (operator) {
+        .eq => if (left.value == right.value) obj.TRUE else obj.FALSE,
+        .not_eq => if (left.value != right.value) obj.TRUE else obj.FALSE,
+        else => blk: {
+            const args = .{ obj.BOOLEAN_OBJ, token.lookupOperatorEnum(operator), obj.BOOLEAN_OBJ };
+            break :blk try new_error(alloc, "unknown operator: {s} {s} {s}", args);
+        },
+    };
 }
 
 fn evalIfExpression(
@@ -253,7 +266,7 @@ fn eval_identifier(
     if (env.get(ident.value)) |identifier_value| {
         return try identifier_value.dupe(alloc);
     }
-    return new_error(alloc, "identifier not found: {s}", .{ident.value});
+    return try new_error(alloc, "identifier not found: {s}", .{ident.value});
 }
 
 fn evalFunctionLiteral(

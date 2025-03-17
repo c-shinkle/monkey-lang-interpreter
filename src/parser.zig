@@ -14,10 +14,15 @@ const ParserError = error{
     MissingRightBrace,
     MissingRightParenthesis,
     UnknownPrefixToken,
+    UnknownOperatorToken,
 } || Allocator.Error || std.fmt.AllocPrintError || std.fmt.ParseIntError;
 
 const PrefixParseFn = *const fn (self: *Parser, alloc: Allocator) ParserError!ast.Expression;
-const InfixParseFn = *const fn (self: *Parser, alloc: Allocator, lhs: ast.Expression) ParserError!ast.Expression;
+const InfixParseFn = *const fn (
+    self: *Parser,
+    alloc: Allocator,
+    lhs: ast.Expression,
+) ParserError!ast.Expression;
 
 const Precedence = enum {
     LOWEST,
@@ -128,6 +133,7 @@ pub const Parser = struct {
                 ParserError.MissingRightParenthesis,
                 ParserError.MissingLeftBrace,
                 ParserError.MissingRightBrace,
+                ParserError.UnknownOperatorToken,
                 => {},
                 ParserError.InvalidCharacter, ParserError.Overflow => {
                     const fmt = "could not parse {s} as integer";
@@ -282,7 +288,8 @@ pub const Parser = struct {
 
     fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
         const _token = self.cur_token;
-        const operator = self.cur_token.literal;
+        const operator = token.lookupOperatorLiteral(self.cur_token.literal) orelse
+            return ParserError.UnknownOperatorToken;
 
         self.nextToken();
 
@@ -301,7 +308,8 @@ pub const Parser = struct {
 
     fn parseInfixExpression(self: *Parser, alloc: Allocator, lhs: ast.Expression) ParserError!ast.Expression {
         const _token = self.cur_token;
-        const operator = self.cur_token.literal;
+        const operator = token.lookupOperatorLiteral(self.cur_token.literal) orelse
+            return ParserError.UnknownOperatorToken;
 
         const precedence = self.curPrecedence();
         self.nextToken();
@@ -734,10 +742,10 @@ test "Integer Literal Expression" {
 
 test "Prefix Expression" {
     const prefix_tests = .{
-        .{ .input = "!5;", .operator = "!", .value = 5 },
-        .{ .input = "-15;", .operator = "-", .value = 15 },
-        .{ .input = "!true;", .operator = "!", .value = true },
-        .{ .input = "!false;", .operator = "!", .value = false },
+        .{ .input = "!5;", .operator = token.Operator.bang, .value = 5 },
+        .{ .input = "-15;", .operator = token.Operator.minus, .value = 15 },
+        .{ .input = "!true;", .operator = token.Operator.bang, .value = true },
+        .{ .input = "!false;", .operator = token.Operator.bang, .value = false },
     };
 
     inline for (prefix_tests) |prefix_test| {
@@ -760,24 +768,79 @@ test "Prefix Expression" {
             else => @panic("statement was not ast.PrefixExpression"),
         };
 
-        try testing.expectEqualStrings(prefix_test.operator, exp.operator);
+        try testing.expectEqual(prefix_test.operator, exp.operator);
         try testLiteralExpression(exp.right.*, prefix_test.value);
     }
 }
 
 test "Infix Expression" {
     const infixBoolTests = .{
-        .{ .input = "5 + 5;", .left_value = 5, .operator = "+", .right_value = 5 },
-        .{ .input = "5 - 5;", .left_value = 5, .operator = "-", .right_value = 5 },
-        .{ .input = "5 * 5;", .left_value = 5, .operator = "*", .right_value = 5 },
-        .{ .input = "5 / 5;", .left_value = 5, .operator = "/", .right_value = 5 },
-        .{ .input = "5 > 5;", .left_value = 5, .operator = ">", .right_value = 5 },
-        .{ .input = "5 < 5;", .left_value = 5, .operator = "<", .right_value = 5 },
-        .{ .input = "5 == 5;", .left_value = 5, .operator = "==", .right_value = 5 },
-        .{ .input = "5 != 5;", .left_value = 5, .operator = "!=", .right_value = 5 },
-        .{ .input = "true == true", .left_value = true, .operator = "==", .right_value = true },
-        .{ .input = "true != false", .left_value = true, .operator = "!=", .right_value = false },
-        .{ .input = "false == false", .left_value = false, .operator = "==", .right_value = false },
+        .{
+            .input = "5 + 5;",
+            .left_value = 5,
+            .operator = token.Operator.plus,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 - 5;",
+            .left_value = 5,
+            .operator = token.Operator.minus,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 * 5;",
+            .left_value = 5,
+            .operator = token.Operator.asterisk,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 / 5;",
+            .left_value = 5,
+            .operator = token.Operator.slash,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 > 5;",
+            .left_value = 5,
+            .operator = token.Operator.gt,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 < 5;",
+            .left_value = 5,
+            .operator = token.Operator.lt,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 == 5;",
+            .left_value = 5,
+            .operator = token.Operator.eq,
+            .right_value = 5,
+        },
+        .{
+            .input = "5 != 5;",
+            .left_value = 5,
+            .operator = token.Operator.not_eq,
+            .right_value = 5,
+        },
+        .{
+            .input = "true == true",
+            .left_value = true,
+            .operator = token.Operator.eq,
+            .right_value = true,
+        },
+        .{
+            .input = "true != false",
+            .left_value = true,
+            .operator = token.Operator.not_eq,
+            .right_value = false,
+        },
+        .{
+            .input = "false == false",
+            .left_value = false,
+            .operator = token.Operator.eq,
+            .right_value = false,
+        },
     };
 
     inline for (infixBoolTests) |infix_test| {
@@ -993,7 +1056,7 @@ test "If Expression" {
     };
 
     const abc = [3]u8{ 'a', 'b', 'c' };
-    try testInfixExpression(if_exp.condition.*, abc, "<", "y");
+    try testInfixExpression(if_exp.condition.*, abc, token.Operator.lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
@@ -1029,7 +1092,7 @@ test "If Else Expression" {
         },
     };
 
-    try testInfixExpression(if_exp.condition.*, "x", "<", "y");
+    try testInfixExpression(if_exp.condition.*, "x", token.Operator.lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
@@ -1083,7 +1146,7 @@ test "Function Literal Expression" {
         .expression_statement => |exp_stmt| exp_stmt,
         else => @panic("stmts[0] is not ast.ExpressionStatement"),
     };
-    try testInfixExpression(body_exp_stmt.expression, "x", "+", "y");
+    try testInfixExpression(body_exp_stmt.expression, "x", token.Operator.plus, "y");
 }
 
 test "Function Parameter Parsing" {
@@ -1165,8 +1228,8 @@ test "Call Expression Parsing" {
     const args = call_exp.arguments;
     try testing.expectEqual(3, args.len);
     try testLiteralExpression(args[0], 1);
-    try testInfixExpression(args[1], 2, "*", 3);
-    try testInfixExpression(args[2], 4, "+", 5);
+    try testInfixExpression(args[1], 2, token.Operator.asterisk, 3);
+    try testInfixExpression(args[2], 4, token.Operator.plus, 5);
 }
 
 //Test Helpers
@@ -1280,7 +1343,7 @@ fn testLiteralExpression(exp: ast.Expression, value: anytype) !void {
 fn testInfixExpression(
     exp: ast.Expression,
     left: anytype,
-    operator: []const u8,
+    operator: token.Operator,
     right: anytype,
 ) !void {
     const op_exp: ast.InfixExpression = switch (exp) {
@@ -1293,7 +1356,7 @@ fn testInfixExpression(
 
     try testLiteralExpression(op_exp.left.*, left);
 
-    try testing.expectEqualStrings(op_exp.operator, operator);
+    try testing.expectEqual(op_exp.operator, operator);
 
     try testLiteralExpression(op_exp.right.*, right);
 }
