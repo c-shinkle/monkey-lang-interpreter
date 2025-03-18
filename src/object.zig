@@ -68,13 +68,9 @@ pub const Integer = struct {
         return try writer.print("{d}", .{self.value});
     }
 
-    pub fn deinit(self: *const Integer, alloc: Allocator) void {
-        _ = self; // autofix
-        _ = alloc; // autofix
-    }
+    pub fn deinit(_: *const Integer, _: Allocator) void {}
 
-    pub fn dupe(self: Integer, alloc: Allocator) Allocator.Error!Object {
-        _ = alloc; // autofix
+    pub fn dupe(self: Integer, _: Allocator) Allocator.Error!Object {
         return Object{ .integer = self };
     }
 };
@@ -86,30 +82,21 @@ pub const Boolean = struct {
         try writer.print("{any}", .{self.value});
     }
 
-    pub fn deinit(self: *const Boolean, alloc: Allocator) void {
-        _ = self; // autofix
-        _ = alloc; // autofix
-    }
+    pub fn deinit(_: *const Boolean, _: Allocator) void {}
 
-    pub fn dupe(self: Boolean, alloc: Allocator) Allocator.Error!Object {
-        _ = alloc; // autofix
+    pub fn dupe(self: Boolean, _: Allocator) Allocator.Error!Object {
         return Object{ .boolean = self };
     }
 };
 
 pub const Null = struct {
-    pub fn inspect(self: *const Null, writer: AnyWriter) AnyWriter.Error!void {
-        _ = self; // autofix
+    pub fn inspect(_: *const Null, writer: AnyWriter) AnyWriter.Error!void {
         try writer.print("null", .{});
     }
 
-    pub fn deinit(self: *const Null, alloc: Allocator) void {
-        _ = self; // autofix
-        _ = alloc; // autofix
-    }
+    pub fn deinit(_: *const Null, _: Allocator) void {}
 
-    pub fn dupe(self: Null, alloc: Allocator) Allocator.Error!Object {
-        _ = alloc; // autofix
+    pub fn dupe(self: Null, _: Allocator) Allocator.Error!Object {
         return Object{ ._null = self };
     }
 };
@@ -216,12 +203,10 @@ pub const Function = struct {
             duped_env_ptr = try self.env.alloc.create(Environment);
             duped_env_ptr.* = duped_env;
         }
-        errdefer {
-            if (!self.env.isRootEnvironment()) {
-                duped_env_ptr.deinit();
-                self.env.alloc.destroy(duped_env_ptr);
-            }
-        }
+        errdefer if (!self.env.isRootEnvironment()) {
+            duped_env_ptr.deinit();
+            self.env.alloc.destroy(duped_env_ptr);
+        };
 
         return Object{
             .function = Function{
