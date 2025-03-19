@@ -119,8 +119,7 @@ fn evalPrefixExpression(
     const child_node = ast.Node{ .expression = prefix.right.* };
     const right = try eval(alloc, child_node, env) orelse return null;
     if (isError(right)) return right;
-    // TODO how was this never caught?
-    // errdefer right.deinit(alloc);
+    defer right.deinit(alloc);
 
     return switch (prefix.operator) {
         .bang => evalBangOperatorExpression(right),
@@ -155,12 +154,12 @@ fn evalInfixOperatorExpression(
     const left_node = ast.Node{ .expression = infix.left.* };
     const left_obj = try eval(alloc, left_node, env) orelse return null;
     if (isError(left_obj)) return left_obj;
-    errdefer left_obj.deinit(alloc);
+    defer left_obj.deinit(alloc);
 
     const right_node = ast.Node{ .expression = infix.right.* };
     const right_obj = try eval(alloc, right_node, env) orelse return null;
     if (isError(right_obj)) return right_obj;
-    errdefer right_obj.deinit(alloc);
+    defer right_obj.deinit(alloc);
 
     const op = infix.operator;
 
@@ -401,7 +400,7 @@ fn applyFunction(
 
 // Test Suite
 
-test "Out of Memory" {
+test "Out of Memory, Without Errors" {
     const inputs = [_][]const u8{
         "5",
         "-5",
@@ -435,6 +434,29 @@ test "Out of Memory" {
         \\let newAdder = fn(x) { fn(y) { x + y }; };
         \\let addTwo = newAdder(2);
         \\addTwo(1);
+    };
+
+    for (inputs) |input| {
+        try testing.checkAllAllocationFailures(
+            testing.allocator,
+            testOutOfMemory,
+            .{input},
+        );
+    }
+}
+
+test "Out of Memory, With Errors" {
+    const inputs = [_][]const u8{
+        "5 + true;",
+        "5 + true; 5;",
+        "-true",
+        "true + false;",
+        "true + false + true + false;",
+        "5; true + false; 5",
+        "if (10 > 1) { true + false; }",
+        "let x = fn() {}; -x;",
+        "let x = fn() {}; let y = 5; x + y;",
+        "let x = 5; let y = fn() {}; x + y;",
     };
 
     for (inputs) |input| {
