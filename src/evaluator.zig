@@ -178,7 +178,7 @@ fn evalInfixOperatorExpression(
 
 fn evalIntegerInfixExpression(
     alloc: Allocator,
-    operator: token.Operator,
+    operator: token.ScopedTokenType(.operator),
     left: obj.Integer,
     right: obj.Integer,
 ) EvalError!obj.Object {
@@ -203,7 +203,7 @@ fn evalIntegerInfixExpression(
 
 fn evalBooleanInfixExpression(
     alloc: Allocator,
-    operator: token.Operator,
+    operator: token.ScopedTokenType(.operator),
     left: obj.Boolean,
     right: obj.Boolean,
 ) EvalError!obj.Object {

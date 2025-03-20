@@ -25,34 +25,31 @@ const InfixParseFn = *const fn (
 ) ParserError!ast.Expression;
 
 const Precedence = enum {
-    LOWEST,
-    EQUALS,
-    LESSGREATER,
-    SUM,
-    PRODUCT,
-    PREFIX,
-    CALL,
+    lowest,
+    equals,
+    lessgreater,
+    sum,
+    product,
+    prefix,
+    call,
 };
 
-const precedences = std.StaticStringMap(Precedence).initComptime(.{
-    .{ token.EQ, Precedence.EQUALS },
-    .{ token.NOT_EQ, Precedence.EQUALS },
-    .{ token.LT, Precedence.LESSGREATER },
-    .{ token.GT, Precedence.LESSGREATER },
-    .{ token.PLUS, Precedence.SUM },
-    .{ token.MINUS, Precedence.SUM },
-    .{ token.SLASH, Precedence.PRODUCT },
-    .{ token.ASTERISK, Precedence.PRODUCT },
-    .{ token.LPAREN, Precedence.CALL },
-});
+fn getPrecedence(_type: token.TokenType) Precedence {
+    return switch (_type) {
+        .eq, .not_eq => Precedence.equals,
+        .lt, .gt => Precedence.lessgreater,
+        .plus, .minus => Precedence.sum,
+        .slash, .asterisk => Precedence.product,
+        .lparen => Precedence.call,
+        else => Precedence.lowest,
+    };
+}
 
 pub const Parser = struct {
     lexer: *Lexer,
     cur_token: token.Token,
     peek_token: token.Token,
     errors: std.ArrayListUnmanaged([]const u8),
-    prefix_parse_fns: std.StringHashMapUnmanaged(PrefixParseFn),
-    infix_parse_fns: std.StringHashMapUnmanaged(InfixParseFn),
 
     // Initialization
 
@@ -62,30 +59,8 @@ pub const Parser = struct {
             .cur_token = undefined,
             .peek_token = undefined,
             .errors = .empty,
-            .prefix_parse_fns = .empty,
-            .infix_parse_fns = .empty,
         };
         errdefer p.deinit(alloc);
-
-        try p.prefix_parse_fns.put(alloc, token.IDENT, parseIdentifier);
-        try p.prefix_parse_fns.put(alloc, token.INT, parseIntegerLiteral);
-        try p.prefix_parse_fns.put(alloc, token.BANG, parsePrefixExpression);
-        try p.prefix_parse_fns.put(alloc, token.MINUS, parsePrefixExpression);
-        try p.prefix_parse_fns.put(alloc, token.TRUE, parseBoolean);
-        try p.prefix_parse_fns.put(alloc, token.FALSE, parseBoolean);
-        try p.prefix_parse_fns.put(alloc, token.LPAREN, parseGroupedExpression);
-        try p.prefix_parse_fns.put(alloc, token.IF, parseIfExpression);
-        try p.prefix_parse_fns.put(alloc, token.FUNCTION, parseFunctionLiteral);
-
-        try p.infix_parse_fns.put(alloc, token.PLUS, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.MINUS, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.SLASH, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.ASTERISK, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.EQ, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.NOT_EQ, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.LT, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.GT, parseInfixExpression);
-        try p.infix_parse_fns.put(alloc, token.LPAREN, parseCallExpression);
 
         p.nextToken();
         p.nextToken();
@@ -97,9 +72,6 @@ pub const Parser = struct {
         for (self.errors.items) |msg| {
             alloc.free(msg);
         }
-
-        self.infix_parse_fns.deinit(alloc);
-        self.prefix_parse_fns.deinit(alloc);
 
         self.errors.deinit(alloc);
     }
@@ -115,7 +87,7 @@ pub const Parser = struct {
             list.deinit(alloc);
         }
 
-        while (!std.mem.eql(u8, self.cur_token._type, token.EOF)) {
+        while (self.cur_token._type != .eof) {
             const maybe_stmt = self.parseStatement(alloc);
             errdefer {
                 if (maybe_stmt) |stmt| {
@@ -154,23 +126,24 @@ pub const Parser = struct {
     // Statement
 
     fn parseStatement(self: *Parser, alloc: Allocator) ParserError!ast.Statement {
-        if (std.mem.eql(u8, token.LET, self.cur_token._type)) {
-            const let_statement = try self.parseLetStatement(alloc);
-            return ast.Statement{ .let_statement = let_statement };
-        } else if (std.mem.eql(u8, token.RETURN, self.cur_token._type)) {
-            const return_statement = try self.parseReturnStatement(alloc);
-            return ast.Statement{ .return_statement = return_statement };
-        } else {
-            const expression_statement = try self.parseExpressionStatement(alloc);
-            return ast.Statement{ .expression_statement = expression_statement };
-        }
+        return switch (self.cur_token._type) {
+            .let => ast.Statement{
+                .let_statement = try self.parseLetStatement(alloc),
+            },
+            ._return => ast.Statement{
+                .return_statement = try self.parseReturnStatement(alloc),
+            },
+            else => ast.Statement{
+                .expression_statement = try self.parseExpressionStatement(alloc),
+            },
+        };
     }
 
     fn parseLetStatement(self: *Parser, alloc: Allocator) ParserError!ast.LetStatement {
         const let_token = self.cur_token;
 
-        if (!self.expectPeek(token.IDENT)) {
-            try self.peekErrors(alloc, token.IDENT);
+        if (!self.expectPeek(.identifier)) {
+            try self.peekErrors(alloc, .identifier);
             return ParserError.MissingLetIdentifier;
         }
 
@@ -179,16 +152,16 @@ pub const Parser = struct {
             .value = self.cur_token.literal,
         };
 
-        if (!self.expectPeek(token.ASSIGN)) {
-            try self.peekErrors(alloc, token.ASSIGN);
+        if (!self.expectPeek(.assign)) {
+            try self.peekErrors(alloc, .assign);
             return ParserError.MissingLetAssign;
         }
 
         self.nextToken();
 
-        const value = try self.parseExpression(alloc, Precedence.LOWEST);
+        const value = try self.parseExpression(alloc, Precedence.lowest);
 
-        if (self.peekTokenIs(token.SEMICOLON)) {
+        if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
         }
 
@@ -200,9 +173,9 @@ pub const Parser = struct {
 
         self.nextToken();
 
-        const return_value = try self.parseExpression(alloc, Precedence.LOWEST);
+        const return_value = try self.parseExpression(alloc, Precedence.lowest);
 
-        if (self.peekTokenIs(token.SEMICOLON)) {
+        if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
         }
 
@@ -211,9 +184,9 @@ pub const Parser = struct {
 
     pub fn parseExpressionStatement(self: *Parser, alloc: Allocator) ParserError!ast.ExpressionStatement {
         const cur_token = self.cur_token;
-        const expression = try self.parseExpression(alloc, Precedence.LOWEST);
+        const expression = try self.parseExpression(alloc, Precedence.lowest);
 
-        if (self.peekTokenIs(token.SEMICOLON)) {
+        if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
         }
 
@@ -231,8 +204,8 @@ pub const Parser = struct {
         }
         self.nextToken();
 
-        while (!self.curTokenIs(token.RBRACE) and
-            !self.curTokenIs(token.EOF)) : (self.nextToken())
+        while (!self.curTokenIs(.rbrace) and
+            !self.curTokenIs(.eof)) : (self.nextToken())
         {
             const statement = try self.parseStatement(alloc);
             errdefer statement.parser_deinit(alloc);
@@ -249,19 +222,19 @@ pub const Parser = struct {
 
     pub fn parseExpression(self: *Parser, alloc: Allocator, precedence: Precedence) ParserError!ast.Expression {
         const precedence_int = @intFromEnum(precedence);
-        const prefix = self.prefix_parse_fns.get(self.cur_token._type) orelse {
+        const prefix = lookupPrefixParseFns(self.cur_token._type) orelse {
             try self.noPrefixParseFnError(alloc, self.cur_token._type);
             return ParserError.UnknownPrefixToken;
         };
 
         var left_exp = try prefix(self, alloc);
 
-        while (!self.peekTokenIs(token.SEMICOLON) and
+        while (!self.peekTokenIs(.semicolon) and
             precedence_int < @intFromEnum(self.peekPrecedence()))
         {
             errdefer left_exp.parser_deinit(alloc);
 
-            const infix = self.infix_parse_fns.get(self.peek_token._type) orelse return left_exp;
+            const infix = lookupInfixParseFns(self.peek_token._type) orelse return left_exp;
             self.nextToken();
             left_exp = try infix(self, alloc, left_exp);
         }
@@ -295,7 +268,7 @@ pub const Parser = struct {
 
         const right = try alloc.create(ast.Expression);
         errdefer alloc.destroy(right);
-        right.* = try self.parseExpression(alloc, Precedence.PREFIX);
+        right.* = try self.parseExpression(alloc, Precedence.prefix);
 
         return ast.Expression{
             .prefix_expression = ast.PrefixExpression{
@@ -336,7 +309,7 @@ pub const Parser = struct {
         return ast.Expression{
             .boolean_expression = ast.Boolean{
                 ._token = self.cur_token,
-                .value = self.curTokenIs(token.TRUE),
+                .value = self.curTokenIs(._true),
             },
         };
     }
@@ -344,9 +317,9 @@ pub const Parser = struct {
     fn parseGroupedExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
         self.nextToken();
 
-        const exp = try self.parseExpression(alloc, Precedence.LOWEST);
+        const exp = try self.parseExpression(alloc, Precedence.lowest);
 
-        if (!self.expectPeek(token.RPAREN)) {
+        if (!self.expectPeek(.rparen)) {
             return ParserError.MissingRightParenthesis;
         }
 
@@ -355,20 +328,20 @@ pub const Parser = struct {
 
     fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
         const _token = self.cur_token;
-        if (!self.expectPeek(token.LPAREN)) {
+        if (!self.expectPeek(.lparen)) {
             return ParserError.MissingLeftParenthesis;
         }
         self.nextToken();
 
         const condition = try alloc.create(ast.Expression);
         errdefer alloc.destroy(condition);
-        condition.* = try self.parseExpression(alloc, Precedence.LOWEST);
+        condition.* = try self.parseExpression(alloc, Precedence.lowest);
         errdefer condition.parser_deinit(alloc);
 
-        if (!self.expectPeek(token.RPAREN)) {
+        if (!self.expectPeek(.rparen)) {
             return ParserError.MissingRightParenthesis;
         }
-        if (!self.expectPeek(token.LBRACE)) {
+        if (!self.expectPeek(.lbrace)) {
             return ParserError.MissingLeftBrace;
         }
 
@@ -378,10 +351,10 @@ pub const Parser = struct {
         errdefer consequence.parser_deinit(alloc);
 
         var maybe_alt: ?*ast.BlockStatement = null;
-        if (self.peekTokenIs(token.ELSE)) {
+        if (self.peekTokenIs(._else)) {
             self.nextToken();
 
-            if (!self.expectPeek(token.LBRACE)) {
+            if (!self.expectPeek(.lbrace)) {
                 return ParserError.MissingLeftBrace;
             }
             maybe_alt = try alloc.create(ast.BlockStatement);
@@ -402,13 +375,13 @@ pub const Parser = struct {
 
     fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
         const _token = self.cur_token;
-        if (!self.expectPeek(token.LPAREN)) {
+        if (!self.expectPeek(.lparen)) {
             return ParserError.MissingLeftParenthesis;
         }
         const parameters = try self.parseFunctionParameters(alloc);
         errdefer alloc.free(parameters);
 
-        if (!self.expectPeek(token.LBRACE)) {
+        if (!self.expectPeek(.lbrace)) {
             return error.MissingLeftBrace;
         }
         const body = try self.parseBlockStatement(alloc);
@@ -426,7 +399,7 @@ pub const Parser = struct {
         var identifiers = std.ArrayListUnmanaged(ast.Identifier).empty;
         errdefer identifiers.deinit(alloc);
 
-        if (self.peekTokenIs(token.RPAREN)) {
+        if (self.peekTokenIs(.rparen)) {
             self.nextToken();
             return try identifiers.toOwnedSlice(alloc);
         }
@@ -438,7 +411,7 @@ pub const Parser = struct {
             .value = self.cur_token.literal,
         });
 
-        while (self.peekTokenIs(token.COMMA)) {
+        while (self.peekTokenIs(.comma)) {
             self.nextToken();
             self.nextToken();
             try identifiers.append(alloc, ast.Identifier{
@@ -447,7 +420,7 @@ pub const Parser = struct {
             });
         }
 
-        if (!self.expectPeek(token.RPAREN)) {
+        if (!self.expectPeek(.rparen)) {
             return ParserError.MissingRightParenthesis;
         }
 
@@ -483,26 +456,26 @@ pub const Parser = struct {
             args.deinit(alloc);
         }
 
-        if (self.peekTokenIs(token.RPAREN)) {
+        if (self.peekTokenIs(.rparen)) {
             self.nextToken();
             return try args.toOwnedSlice(alloc);
         }
 
         self.nextToken();
 
-        const first_exp = try self.parseExpression(alloc, Precedence.LOWEST);
+        const first_exp = try self.parseExpression(alloc, Precedence.lowest);
         errdefer first_exp.parser_deinit(alloc);
         try args.append(alloc, first_exp);
 
-        while (self.peekTokenIs(token.COMMA)) {
+        while (self.peekTokenIs(.comma)) {
             self.nextToken();
             self.nextToken();
-            const loop_exp = try self.parseExpression(alloc, Precedence.LOWEST);
+            const loop_exp = try self.parseExpression(alloc, Precedence.lowest);
             errdefer loop_exp.parser_deinit(alloc);
             try args.append(alloc, loop_exp);
         }
 
-        if (!self.expectPeek(token.RPAREN)) {
+        if (!self.expectPeek(.rparen)) {
             return ParserError.MissingRightParenthesis;
         }
 
@@ -517,11 +490,11 @@ pub const Parser = struct {
     }
 
     fn curTokenIs(self: *const Parser, t: token.TokenType) bool {
-        return std.mem.eql(u8, self.cur_token._type, t);
+        return self.cur_token._type == t;
     }
 
     fn peekTokenIs(self: *const Parser, t: token.TokenType) bool {
-        return std.mem.eql(u8, self.peek_token._type, t);
+        return self.peek_token._type == t;
     }
 
     fn expectPeek(self: *Parser, _token: token.TokenType) bool {
@@ -534,25 +507,46 @@ pub const Parser = struct {
     }
 
     fn peekErrors(self: *Parser, alloc: Allocator, t: token.TokenType) !void {
-        const fmt = "expected next token to be {s}, got {s} instead";
+        const fmt = "expected next token to be {any}, got {any} instead";
         const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token._type });
         errdefer alloc.free(msg);
         try self.errors.append(alloc, msg);
     }
 
     fn noPrefixParseFnError(self: *Parser, alloc: Allocator, t: token.TokenType) !void {
-        const fmt = "no prefix parse function for {s} found";
+        const fmt = "no prefix parse function for {any} found";
         const msg = try std.fmt.allocPrint(alloc, fmt, .{t});
         errdefer alloc.free(msg);
         try self.errors.append(alloc, msg);
     }
 
     fn peekPrecedence(self: *const Parser) Precedence {
-        return precedences.get(self.peek_token._type) orelse Precedence.LOWEST;
+        return getPrecedence(self.peek_token._type);
     }
 
     fn curPrecedence(self: *const Parser) Precedence {
-        return precedences.get(self.cur_token._type) orelse Precedence.LOWEST;
+        return getPrecedence(self.cur_token._type);
+    }
+
+    fn lookupPrefixParseFns(token_type: token.TokenType) ?PrefixParseFn {
+        return switch (token_type) {
+            .identifier => parseIdentifier,
+            .int => parseIntegerLiteral,
+            .bang, .minus => parsePrefixExpression,
+            ._true, ._false => parseBoolean,
+            .lparen => parseGroupedExpression,
+            ._if => parseIfExpression,
+            ._function => parseFunctionLiteral,
+            else => null,
+        };
+    }
+
+    fn lookupInfixParseFns(token_type: token.TokenType) ?InfixParseFn {
+        return switch (token_type) {
+            .plus, .minus, .slash, .asterisk, .eq, .not_eq, .lt, .gt => parseInfixExpression,
+            .lparen => parseCallExpression,
+            else => null,
+        };
     }
 };
 
@@ -600,10 +594,10 @@ test "Out of Memory, with Parser errors" {
     ;
 
     const expecteds = [_][]const u8{
-        "expected next token to be =, got INT instead",
-        "expected next token to be IDENT, got = instead",
-        "no prefix parse function for = found",
-        "expected next token to be IDENT, got INT instead",
+        "expected next token to be token.TokenType.assign, got token.TokenType.int instead",
+        "expected next token to be token.TokenType.identifier, got token.TokenType.assign instead",
+        "no prefix parse function for token.TokenType.assign found",
+        "expected next token to be token.TokenType.identifier, got token.TokenType.int instead",
     };
 
     try testing.checkAllAllocationFailures(
@@ -742,10 +736,10 @@ test "Integer Literal Expression" {
 
 test "Prefix Expression" {
     const prefix_tests = .{
-        .{ .input = "!5;", .operator = token.Operator.bang, .value = 5 },
-        .{ .input = "-15;", .operator = token.Operator.minus, .value = 15 },
-        .{ .input = "!true;", .operator = token.Operator.bang, .value = true },
-        .{ .input = "!false;", .operator = token.Operator.bang, .value = false },
+        .{ .input = "!5;", .operator = token.ScopedTokenType(.operator).bang, .value = 5 },
+        .{ .input = "-15;", .operator = token.ScopedTokenType(.operator).minus, .value = 15 },
+        .{ .input = "!true;", .operator = token.ScopedTokenType(.operator).bang, .value = true },
+        .{ .input = "!false;", .operator = token.ScopedTokenType(.operator).bang, .value = false },
     };
 
     inline for (prefix_tests) |prefix_test| {
@@ -778,67 +772,67 @@ test "Infix Expression" {
         .{
             .input = "5 + 5;",
             .left_value = 5,
-            .operator = token.Operator.plus,
+            .operator = token.ScopedTokenType(.operator).plus,
             .right_value = 5,
         },
         .{
             .input = "5 - 5;",
             .left_value = 5,
-            .operator = token.Operator.minus,
+            .operator = token.ScopedTokenType(.operator).minus,
             .right_value = 5,
         },
         .{
             .input = "5 * 5;",
             .left_value = 5,
-            .operator = token.Operator.asterisk,
+            .operator = token.ScopedTokenType(.operator).asterisk,
             .right_value = 5,
         },
         .{
             .input = "5 / 5;",
             .left_value = 5,
-            .operator = token.Operator.slash,
+            .operator = token.ScopedTokenType(.operator).slash,
             .right_value = 5,
         },
         .{
             .input = "5 > 5;",
             .left_value = 5,
-            .operator = token.Operator.gt,
+            .operator = token.ScopedTokenType(.operator).gt,
             .right_value = 5,
         },
         .{
             .input = "5 < 5;",
             .left_value = 5,
-            .operator = token.Operator.lt,
+            .operator = token.ScopedTokenType(.operator).lt,
             .right_value = 5,
         },
         .{
             .input = "5 == 5;",
             .left_value = 5,
-            .operator = token.Operator.eq,
+            .operator = token.ScopedTokenType(.operator).eq,
             .right_value = 5,
         },
         .{
             .input = "5 != 5;",
             .left_value = 5,
-            .operator = token.Operator.not_eq,
+            .operator = token.ScopedTokenType(.operator).not_eq,
             .right_value = 5,
         },
         .{
             .input = "true == true",
             .left_value = true,
-            .operator = token.Operator.eq,
+            .operator = token.ScopedTokenType(.operator).eq,
             .right_value = true,
         },
         .{
             .input = "true != false",
             .left_value = true,
-            .operator = token.Operator.not_eq,
+            .operator = token.ScopedTokenType(.operator).not_eq,
             .right_value = false,
         },
         .{
             .input = "false == false",
             .left_value = false,
-            .operator = token.Operator.eq,
+            .operator = token.ScopedTokenType(.operator).eq,
             .right_value = false,
         },
     };
@@ -1056,7 +1050,7 @@ test "If Expression" {
     };
 
     const abc = [3]u8{ 'a', 'b', 'c' };
-    try testInfixExpression(if_exp.condition.*, abc, token.Operator.lt, "y");
+    try testInfixExpression(if_exp.condition.*, abc, token.ScopedTokenType(.operator).lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
@@ -1092,7 +1086,7 @@ test "If Else Expression" {
         },
     };
 
-    try testInfixExpression(if_exp.condition.*, "x", token.Operator.lt, "y");
+    try testInfixExpression(if_exp.condition.*, "x", token.ScopedTokenType(.operator).lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
@@ -1146,7 +1140,7 @@ test "Function Literal Expression" {
         .expression_statement => |exp_stmt| exp_stmt,
         else => @panic("stmts[0] is not ast.ExpressionStatement"),
     };
-    try testInfixExpression(body_exp_stmt.expression, "x", token.Operator.plus, "y");
+    try testInfixExpression(body_exp_stmt.expression, "x", token.ScopedTokenType(.operator).plus, "y");
 }
 
 test "Function Parameter Parsing" {
@@ -1228,8 +1222,8 @@ test "Call Expression Parsing" {
     const args = call_exp.arguments;
     try testing.expectEqual(3, args.len);
     try testLiteralExpression(args[0], 1);
-    try testInfixExpression(args[1], 2, token.Operator.asterisk, 3);
-    try testInfixExpression(args[2], 4, token.Operator.plus, 5);
+    try testInfixExpression(args[1], 2, token.ScopedTokenType(.operator).asterisk, 3);
+    try testInfixExpression(args[2], 4, token.ScopedTokenType(.operator).plus, 5);
 }
 
 //Test Helpers
@@ -1343,7 +1337,7 @@ fn testLiteralExpression(exp: ast.Expression, value: anytype) !void {
 fn testInfixExpression(
     exp: ast.Expression,
     left: anytype,
-    operator: token.Operator,
+    operator: token.ScopedTokenType(.operator),
     right: anytype,
 ) !void {
     const op_exp: ast.InfixExpression = switch (exp) {
