@@ -87,7 +87,7 @@ pub const Parser = struct {
             list.deinit(alloc);
         }
 
-        while (self.cur_token._type != .eof) {
+        while (self.cur_token.token_type != .eof) {
             const maybe_stmt = self.parseStatement(alloc);
             errdefer {
                 if (maybe_stmt) |stmt| {
@@ -126,7 +126,7 @@ pub const Parser = struct {
     // Statement
 
     fn parseStatement(self: *Parser, alloc: Allocator) ParserError!ast.Statement {
-        return switch (self.cur_token._type) {
+        return switch (self.cur_token.token_type) {
             .let => ast.Statement{
                 .let_statement = try self.parseLetStatement(alloc),
             },
@@ -222,8 +222,8 @@ pub const Parser = struct {
 
     pub fn parseExpression(self: *Parser, alloc: Allocator, precedence: Precedence) ParserError!ast.Expression {
         const precedence_int = @intFromEnum(precedence);
-        const prefix = lookupPrefixParseFns(self.cur_token._type) orelse {
-            try self.noPrefixParseFnError(alloc, self.cur_token._type);
+        const prefix = lookupPrefixParseFns(self.cur_token.token_type) orelse {
+            try self.noPrefixParseFnError(alloc, self.cur_token.token_type);
             return ParserError.UnknownPrefixToken;
         };
 
@@ -234,7 +234,7 @@ pub const Parser = struct {
         {
             errdefer left_exp.parser_deinit(alloc);
 
-            const infix = lookupInfixParseFns(self.peek_token._type) orelse return left_exp;
+            const infix = lookupInfixParseFns(self.peek_token.token_type) orelse return left_exp;
             self.nextToken();
             left_exp = try infix(self, alloc, left_exp);
         }
@@ -261,7 +261,7 @@ pub const Parser = struct {
 
     fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
         const _token = self.cur_token;
-        const operator = token.lookupOperatorLiteral(self.cur_token.literal) orelse
+        const operator = token.findOperatorByLiteral(self.cur_token.literal) orelse
             return ParserError.UnknownOperatorToken;
 
         self.nextToken();
@@ -281,7 +281,7 @@ pub const Parser = struct {
 
     fn parseInfixExpression(self: *Parser, alloc: Allocator, lhs: ast.Expression) ParserError!ast.Expression {
         const _token = self.cur_token;
-        const operator = token.lookupOperatorLiteral(self.cur_token.literal) orelse
+        const operator = token.findOperatorByLiteral(self.cur_token.literal) orelse
             return ParserError.UnknownOperatorToken;
 
         const precedence = self.curPrecedence();
@@ -490,11 +490,11 @@ pub const Parser = struct {
     }
 
     fn curTokenIs(self: *const Parser, t: token.TokenType) bool {
-        return self.cur_token._type == t;
+        return self.cur_token.token_type == t;
     }
 
     fn peekTokenIs(self: *const Parser, t: token.TokenType) bool {
-        return self.peek_token._type == t;
+        return self.peek_token.token_type == t;
     }
 
     fn expectPeek(self: *Parser, _token: token.TokenType) bool {
@@ -508,7 +508,7 @@ pub const Parser = struct {
 
     fn peekErrors(self: *Parser, alloc: Allocator, t: token.TokenType) !void {
         const fmt = "expected next token to be {any}, got {any} instead";
-        const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token._type });
+        const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token.token_type });
         errdefer alloc.free(msg);
         try self.errors.append(alloc, msg);
     }
@@ -521,11 +521,11 @@ pub const Parser = struct {
     }
 
     fn peekPrecedence(self: *const Parser) Precedence {
-        return getPrecedence(self.peek_token._type);
+        return getPrecedence(self.peek_token.token_type);
     }
 
     fn curPrecedence(self: *const Parser) Precedence {
-        return getPrecedence(self.cur_token._type);
+        return getPrecedence(self.cur_token.token_type);
     }
 
     fn lookupPrefixParseFns(token_type: token.TokenType) ?PrefixParseFn {

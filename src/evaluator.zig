@@ -125,7 +125,7 @@ fn evalPrefixExpression(
         .bang => evalBangOperatorExpression(right),
         .minus => try evalMinusPrefixOperatorExperssion(alloc, right),
         else => blk: {
-            const args = .{ token.lookupOperatorEnum(prefix.operator), right._type() };
+            const args = .{ token.getLiteralByOperator(prefix.operator), right._type() };
             break :blk try newError(alloc, "unknown operator: {s}{s}", args);
         },
     };
@@ -168,17 +168,17 @@ fn evalInfixOperatorExpression(
     } else if (left_obj == .boolean and right_obj == .boolean) {
         return try evalBooleanInfixExpression(alloc, op, left_obj.boolean, right_obj.boolean);
     } else if (!left_obj.eql(right_obj)) {
-        const args = .{ left_obj._type(), token.lookupOperatorEnum(op), right_obj._type() };
+        const args = .{ left_obj._type(), token.getLiteralByOperator(op), right_obj._type() };
         return try newError(alloc, "type mismatch: {s} {s} {s}", args);
     }
 
-    const args = .{ left_obj._type(), token.lookupOperatorEnum(op), right_obj._type() };
+    const args = .{ left_obj._type(), token.getLiteralByOperator(op), right_obj._type() };
     return try newError(alloc, "unknown operator: {s} {s} {s}", args);
 }
 
 fn evalIntegerInfixExpression(
     alloc: Allocator,
-    operator: token.ScopedTokenType(.operator),
+    operator: token.Operator,
     left: obj.Integer,
     right: obj.Integer,
 ) EvalError!obj.Object {
@@ -187,7 +187,7 @@ fn evalIntegerInfixExpression(
         .minus => obj.Object{ .integer = obj.Integer{ .value = left.value - right.value } },
         .asterisk => obj.Object{ .integer = obj.Integer{ .value = left.value * right.value } },
         .slash => obj.Object{
-            .integer = obj.Integer{ .value = @divTrunc(left.value, right.value) },
+            .integer = obj.Integer{ .value = @divFloor(left.value, right.value) },
         },
         .lt => if (left.value < right.value) obj.TRUE else obj.FALSE,
         .gt => if (left.value > right.value) obj.TRUE else obj.FALSE,
@@ -203,7 +203,7 @@ fn evalIntegerInfixExpression(
 
 fn evalBooleanInfixExpression(
     alloc: Allocator,
-    operator: token.ScopedTokenType(.operator),
+    operator: token.Operator,
     left: obj.Boolean,
     right: obj.Boolean,
 ) EvalError!obj.Object {
@@ -211,7 +211,7 @@ fn evalBooleanInfixExpression(
         .eq => if (left.value == right.value) obj.TRUE else obj.FALSE,
         .not_eq => if (left.value != right.value) obj.TRUE else obj.FALSE,
         else => blk: {
-            const args = .{ obj.BOOLEAN_OBJ, token.lookupOperatorEnum(operator), obj.BOOLEAN_OBJ };
+            const args = .{ obj.BOOLEAN_OBJ, token.getLiteralByOperator(operator), obj.BOOLEAN_OBJ };
             break :blk try newError(alloc, "unknown operator: {s} {s} {s}", args);
         },
     };

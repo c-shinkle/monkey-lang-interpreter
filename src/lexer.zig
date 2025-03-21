@@ -38,57 +38,46 @@ pub const Lexer = struct {
 
         const ch = self.ch;
         const tok: Token = switch (ch.*) {
-            0 => Token{ ._type = TokenType.eof, .literal = "" },
+            0 => Token{ .token_type = TokenType.eof, .literal = token.EOF },
             '=' => blk: {
                 if (self.peekChar() == '=') {
-                    const start = self.position;
                     self.readChar();
-                    break :blk Token{
-                        ._type = TokenType.eq,
-                        .literal = self.input[start .. start + 2],
-                    };
+                    break :blk Token{ .token_type = TokenType.eq, .literal = token.EQ };
                 }
-                break :blk newToken(TokenType.assign, ch);
+                break :blk Token{ .token_type = TokenType.assign, .literal = token.ASSIGN };
             },
-            '+' => newToken(TokenType.plus, ch),
-            '-' => newToken(TokenType.minus, ch),
+            '+' => Token{ .token_type = TokenType.plus, .literal = token.PLUS },
+            '-' => Token{ .token_type = TokenType.minus, .literal = token.MINUS },
             '!' => blk: {
                 if (self.peekChar() == '=') {
                     const start = self.position;
                     self.readChar();
                     break :blk Token{
-                        ._type = TokenType.not_eq,
+                        .token_type = TokenType.not_eq,
                         .literal = self.input[start .. start + 2],
                     };
                 }
-                break :blk newToken(TokenType.bang, ch);
+                break :blk Token{ .token_type = TokenType.bang, .literal = token.BANG };
             },
-            '/' => newToken(TokenType.slash, ch),
-            '*' => newToken(TokenType.asterisk, ch),
-            '<' => newToken(TokenType.lt, ch),
-            '>' => newToken(TokenType.gt, ch),
-            ';' => newToken(TokenType.semicolon, ch),
-            ',' => newToken(TokenType.comma, ch),
-            '(' => newToken(TokenType.lparen, ch),
-            ')' => newToken(TokenType.rparen, ch),
-            '{' => newToken(TokenType.lbrace, ch),
-            '}' => newToken(TokenType.rbrace, ch),
+            '/' => Token{ .token_type = TokenType.slash, .literal = token.SLASH },
+            '*' => Token{ .token_type = TokenType.asterisk, .literal = token.ASTERISK },
+            '<' => Token{ .token_type = TokenType.lt, .literal = token.LT },
+            '>' => Token{ .token_type = TokenType.gt, .literal = token.GT },
+            ';' => Token{ .token_type = TokenType.semicolon, .literal = token.SEMICOLON },
+            ',' => Token{ .token_type = TokenType.comma, .literal = token.COMMA },
+            '(' => Token{ .token_type = TokenType.lparen, .literal = token.LPAREN },
+            ')' => Token{ .token_type = TokenType.rparen, .literal = token.RPAREN },
+            '{' => Token{ .token_type = TokenType.lbrace, .literal = token.LBRACE },
+            '}' => Token{ .token_type = TokenType.rbrace, .literal = token.RBRACE },
             else => blk: {
                 if (isLetter(ch.*)) {
                     const literal = self.readIdentifier();
-                    const _type = token.lookupIdent(literal);
-                    return Token{
-                        ._type = _type,
-                        .literal = literal,
-                    };
+                    const token_type = token.getKeywordByLiteral(literal);
+                    return Token{ .token_type = token_type, .literal = literal };
                 } else if (std.ascii.isDigit(ch.*)) {
-                    return Token{
-                        ._type = TokenType.int,
-                        .literal = self.readNumber(),
-                    };
-                } else {
-                    break :blk newToken(TokenType.illegal, ch);
+                    return Token{ .token_type = TokenType.int, .literal = self.readNumber() };
                 }
+                break :blk Token{ .token_type = TokenType.illegal, .literal = ch[0..1] };
             },
         };
         self.readChar();
@@ -99,10 +88,6 @@ pub const Lexer = struct {
         while (std.ascii.isWhitespace(self.ch.*)) {
             self.readChar();
         }
-    }
-
-    fn newToken(token_type: TokenType, ch: *const u8) Token {
-        return Token{ ._type = token_type, .literal = ch[0..1] };
     }
 
     fn readIdentifier(self: *Lexer) []const u8 {
@@ -126,11 +111,10 @@ pub const Lexer = struct {
     }
 
     fn peekChar(self: *const Lexer) u8 {
-        if (self.read_position >= self.input.len) {
-            return 0;
-        } else {
-            return self.input[self.read_position];
-        }
+        return if (self.read_position >= self.input.len)
+            0
+        else
+            self.input[self.read_position];
     }
 };
 
@@ -455,7 +439,7 @@ test "Test Next Token" {
 
     for (expecteds) |expected| {
         const tok = l.nextToken();
-        try testing.expectEqual(expected.expected_type, tok._type);
+        try testing.expectEqual(expected.expected_type, tok.token_type);
         try testing.expectEqualStrings(expected.expected_literal, tok.literal);
     }
 }

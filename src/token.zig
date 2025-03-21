@@ -2,19 +2,21 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const Token = struct {
-    _type: TokenType,
+    token_type: TokenType,
     literal: []const u8,
 
-    pub fn dupe(self: Token, alloc: Allocator) !Token {
-        const duped_literal = try alloc.dupe(u8, self.literal);
-        return Token{
-            ._type = self._type,
-            .literal = duped_literal,
-        };
+    pub fn dupe(self: Token, alloc: Allocator) Allocator.Error!Token {
+        const literal = if (self.token_type.isLiteralAllocated())
+            try alloc.dupe(u8, self.literal)
+        else
+            self.literal;
+        return Token{ .token_type = self.token_type, .literal = literal };
     }
 
     pub fn dupe_deinit(self: Token, alloc: Allocator) void {
-        alloc.free(self.literal);
+        if (self.token_type.isLiteralAllocated()) {
+            alloc.free(self.literal);
+        }
     }
 };
 
@@ -29,7 +31,6 @@ pub const TokenType = enum {
     gt,
     eq,
     not_eq,
-    identifier,
     _function,
     let,
     _true,
@@ -43,50 +44,55 @@ pub const TokenType = enum {
     rparen,
     lbrace,
     rbrace,
-    int,
-    illegal,
     eof,
+    illegal,
+    identifier,
+    int,
+
+    pub fn scope(self: TokenType) Scope {
+        return switch (self) {
+            // Operator
+            .assign,
+            .plus,
+            .minus,
+            .bang,
+            .asterisk,
+            .slash,
+            .lt,
+            .gt,
+            .eq,
+            .not_eq,
+            => .operator,
+            // Keyword
+            ._function,
+            .let,
+            ._true,
+            ._false,
+            ._if,
+            ._else,
+            ._return,
+            // Delimiter
+            .comma,
+            .semicolon,
+            .lparen,
+            .rparen,
+            .lbrace,
+            .rbrace,
+            .eof,
+            // Value
+            .illegal,
+            .identifier,
+            .int,
+            => .not_operator,
+        };
+    }
+
+    pub fn isLiteralAllocated(self: TokenType) bool {
+        return self == .illegal or self == .identifier or self == .int;
+    }
 };
 
-pub const Scope = enum { operator, keyword, other };
-
-pub fn scope(token_type: TokenType) Scope {
-    return switch (token_type) {
-        // Operator
-        .assign,
-        .plus,
-        .minus,
-        .bang,
-        .asterisk,
-        .slash,
-        .lt,
-        .gt,
-        .eq,
-        .not_eq,
-        => .operator,
-        // Keyword
-        ._function,
-        .let,
-        ._true,
-        ._false,
-        ._if,
-        ._else,
-        ._return,
-        .identifier,
-        => .keyword,
-        // Other
-        .illegal,
-        .eof,
-        .int,
-        .comma,
-        .semicolon,
-        .lparen,
-        .rparen,
-        .lbrace,
-        .rbrace,
-        => .other,
-    };
-}
+pub const Scope = enum { operator, not_operator };
 
 pub fn ScopedTokenType(comptime s: Scope) type {
     const e_info = @typeInfo(TokenType);
@@ -94,7 +100,8 @@ pub fn ScopedTokenType(comptime s: Scope) type {
     var i: usize = 0;
     var fields: [all_fields.len]std.builtin.Type.EnumField = undefined;
     for (all_fields) |field| {
-        if (scope(@enumFromInt(field.value)) == s) {
+        const token_type: TokenType = @enumFromInt(field.value);
+        if (token_type.scope() == s) {
             fields[i] = field;
             i += 1;
         }
@@ -110,57 +117,78 @@ pub fn ScopedTokenType(comptime s: Scope) type {
     });
 }
 
-pub fn scoped(self: TokenType, comptime s: Scope) ?ScopedTokenType(s) {
-    switch (self) {
-        inline else => |token_type| {
-            if (comptime scope(token_type) != s) return null;
-            return ScopedTokenType(token_type);
-        },
-    }
-}
-
-const keywords = std.StaticStringMap(TokenType).initComptime(.{
-    .{ "fn", ._function },
-    .{ "let", .let },
-    .{ "true", ._true },
-    .{ "false", ._false },
-    .{ "if", ._if },
-    .{ "else", ._else },
-    .{ "return", ._return },
+// Operators
+pub const Operator = ScopedTokenType(.operator);
+pub const ASSIGN = "=";
+pub const PLUS = "+";
+pub const MINUS = "-";
+pub const BANG = "!";
+pub const ASTERISK = "*";
+pub const SLASH = "/";
+pub const LT = "<";
+pub const GT = ">";
+pub const EQ = "==";
+pub const NOT_EQ = "!=";
+const operators_map = std.StaticStringMap(Operator).initComptime(.{
+    .{ ASSIGN, .assign },
+    .{ PLUS, .plus },
+    .{ MINUS, .minus },
+    .{ BANG, .bang },
+    .{ ASTERISK, .asterisk },
+    .{ SLASH, .slash },
+    .{ LT, .lt },
+    .{ GT, .gt },
+    .{ EQ, .eq },
+    .{ NOT_EQ, .not_eq },
 });
-
-pub fn lookupIdent(ident: []const u8) TokenType {
-    return keywords.get(ident) orelse TokenType.identifier;
+pub fn findOperatorByLiteral(literal: []const u8) ?Operator {
+    return operators_map.get(literal);
 }
-
-const literals_to_operators = std.StaticStringMap(ScopedTokenType(.operator)).initComptime(.{
-    .{ "=", .assign },
-    .{ "+", .plus },
-    .{ "-", .minus },
-    .{ "!", .bang },
-    .{ "*", .asterisk },
-    .{ "/", .slash },
-    .{ "<", .lt },
-    .{ ">", .gt },
-    .{ "==", .eq },
-    .{ "!=", .not_eq },
-});
-
-pub fn lookupOperatorLiteral(literal: []const u8) ?ScopedTokenType(.operator) {
-    return literals_to_operators.get(literal);
-}
-
-pub fn lookupOperatorEnum(operator: ScopedTokenType(.operator)) []const u8 {
+pub fn getLiteralByOperator(operator: Operator) []const u8 {
     return switch (operator) {
-        .assign => "=",
-        .plus => "+",
-        .minus => "-",
-        .bang => "!",
-        .asterisk => "*",
-        .slash => "/",
-        .lt => "<",
-        .gt => ">",
-        .eq => "==",
-        .not_eq => "!=",
+        .assign => ASSIGN,
+        .plus => PLUS,
+        .minus => MINUS,
+        .bang => BANG,
+        .asterisk => ASTERISK,
+        .slash => SLASH,
+        .lt => LT,
+        .gt => GT,
+        .eq => EQ,
+        .not_eq => NOT_EQ,
     };
+}
+
+// Keywords
+pub const FUNCTION = "fn";
+pub const LET = "let";
+pub const TRUE = "true";
+pub const FALSE = "false";
+pub const IF = "if";
+pub const ELSE = "else";
+pub const RETURN = "return";
+const keywords_map = std.StaticStringMap(TokenType).initComptime(.{
+    .{ FUNCTION, ._function },
+    .{ LET, .let },
+    .{ TRUE, ._true },
+    .{ FALSE, ._false },
+    .{ IF, ._if },
+    .{ ELSE, ._else },
+    .{ RETURN, ._return },
+});
+pub fn getKeywordByLiteral(literal: []const u8) TokenType {
+    return keywords_map.get(literal) orelse TokenType.identifier;
+}
+
+// Delimiters
+pub const COMMA = ",";
+pub const SEMICOLON = ";";
+pub const LPAREN = "(";
+pub const RPAREN = ")";
+pub const LBRACE = "{";
+pub const RBRACE = "}";
+pub const EOF = "";
+
+test {
+    std.testing.refAllDecls(@This());
 }
