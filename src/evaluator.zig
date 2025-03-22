@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 const ast = @import("ast.zig");
 const Environment = @import("environment.zig").Environment;
@@ -437,11 +438,7 @@ test "Out of Memory, Without Errors" {
     };
 
     for (inputs) |input| {
-        try testing.checkAllAllocationFailures(
-            testing.allocator,
-            testOutOfMemory,
-            .{input},
-        );
+        try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
     }
 }
 
@@ -460,11 +457,7 @@ test "Out of Memory, With Errors" {
     };
 
     for (inputs) |input| {
-        try testing.checkAllAllocationFailures(
-            testing.allocator,
-            testOutOfMemory,
-            .{input},
-        );
+        try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
     }
 }
 
@@ -488,9 +481,10 @@ test "Integer Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
-        defer evaluated.deinit(testing.allocator);
-        try testIntegerObject(eval_test.expected, evaluated);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = (try testEval(eval_test.input, arena.allocator())).?;
+        try testIntegerObject(eval_test.expected, actual);
     }
 }
 
@@ -518,9 +512,10 @@ test "Boolean Expression" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
-        defer evaluated.deinit(testing.allocator);
-        try testBooleanObject(eval_test.expected, evaluated);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = (try testEval(eval_test.input, arena.allocator())).?;
+        try testBooleanObject(eval_test.expected, actual);
     }
 }
 
@@ -535,9 +530,10 @@ test "Bang Operator" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
-        defer evaluated.deinit(testing.allocator);
-        try testBooleanObject(eval_test.expected, evaluated);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = (try testEval(eval_test.input, arena.allocator())).?;
+        try testBooleanObject(eval_test.expected, actual);
     }
 }
 
@@ -553,12 +549,13 @@ test "If Else Expressions" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
-        defer evaluated.deinit(testing.allocator);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = (try testEval(eval_test.input, arena.allocator())).?;
         if (eval_test.expected) |expected| {
-            try testIntegerObject(expected, evaluated);
+            try testIntegerObject(expected, actual);
         } else {
-            try testNullObject(evaluated);
+            try testNullObject(actual);
         }
     }
 }
@@ -596,9 +593,10 @@ test "Return Statements" {
     };
 
     for (eval_tests) |eval_test| {
-        const evaluated = (try testEval(eval_test.input, testing.allocator)).?;
-        defer evaluated.deinit(testing.allocator);
-        try testIntegerObject(eval_test.expected, evaluated);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = (try testEval(eval_test.input, arena.allocator())).?;
+        try testIntegerObject(eval_test.expected, actual);
     }
 }
 
@@ -651,15 +649,13 @@ test "Error Handling" {
     };
 
     for (eval_tests) |eval_test| {
-        const maybe = try testEval(eval_test.input, testing.allocator);
-        const evaluated = maybe orelse return error.TestExpectedEqual;
-        defer evaluated.deinit(testing.allocator);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = try testEval(eval_test.input, arena.allocator()) orelse
+            return error.TestExpectedEqual;
 
-        if (evaluated != ._error) {
-            std.debug.print("object is not Error. got={any}\n", .{evaluated});
-            continue;
-        }
-        try testing.expectEqualStrings(eval_test.expected, evaluated._error.message);
+        try testing.expect(._error == actual);
+        try testing.expectEqualStrings(eval_test.expected, actual._error.message);
     }
 }
 
@@ -681,27 +677,24 @@ test "Let Statements" {
 test "Function Object" {
     const input = "fn(x) { x + 2 };";
 
-    var env = Environment.init(testing.allocator);
-    defer env.deinit();
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var env = Environment.init(arena.allocator());
 
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
 
     const node = ast.Node{ .program = program };
-    const evaluated = (try eval(testing.allocator, node, &env)).?;
-    defer evaluated.deinit(testing.allocator);
+    const actual = (try eval(arena.allocator(), node, &env)).?;
 
-    try testing.expect(evaluated == .function);
-    const function = evaluated.function;
+    try testing.expect(actual == .function);
+    const function = actual.function;
 
     try testing.expectEqual(1, function.parameters.len);
 
     var array_list = std.ArrayListUnmanaged(u8).empty;
-    defer array_list.deinit(testing.allocator);
-    const writer = array_list.writer(testing.allocator).any();
+    const writer = array_list.writer(arena.allocator()).any();
 
     try function.parameters[0].string(writer);
     try testing.expectEqualStrings("x", array_list.items);
@@ -727,8 +720,9 @@ test "Function Application" {
     };
 
     for (eval_tests) |eval_test| {
-        const actual = (try testEval(eval_test.input, testing.allocator)).?;
-        defer actual.deinit(testing.allocator);
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const actual = (try testEval(eval_test.input, arena.allocator())).?;
         try testIntegerObject(eval_test.expected, actual);
     }
 }
@@ -748,8 +742,9 @@ test "Enclosing Environments" {
         \\ourFunction(20) + first + second;
     ;
 
-    const actual = (try testEval(input, testing.allocator)).?;
-    defer actual.deinit(testing.allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const actual = (try testEval(input, arena.allocator())).?;
 
     try testIntegerObject(70, actual);
 }
@@ -793,17 +788,16 @@ fn testNullObject(object: obj.Object) !void {
     }
 }
 
-fn testOutOfMemory(allocator: Allocator, input: []const u8) !void {
-    var env = Environment.init(testing.allocator);
+fn testOutOfMemory(alloc: Allocator, input: []const u8) !void {
+    var arena = ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    var env = Environment.init(arena.allocator());
     defer env.deinit();
 
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
 
     const node = ast.Node{ .program = program };
-    const maybe = try eval(testing.allocator, node, &env);
-    if (maybe) |actual| actual.deinit(allocator);
+    _ = try eval(arena.allocator(), node, &env);
 }

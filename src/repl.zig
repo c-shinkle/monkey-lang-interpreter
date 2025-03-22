@@ -20,8 +20,9 @@ pub fn start(stdout: AnyWriter) !void {
     var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
 
-    var env = Environment.init(std.heap.smp_allocator);
-    defer env.deinit();
+    var global_env_alloc = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+    defer global_env_alloc.deinit();
+    var env = Environment.init(global_env_alloc.allocator());
 
     try stdout.print(">> ", .{});
     while (true) : ({
@@ -40,13 +41,12 @@ pub fn start(stdout: AnyWriter) !void {
 
         var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer arena.deinit();
-        const alloc = arena.allocator();
 
-        var parser = try Parser.init(&lexer, alloc);
-        const program = try parser.parseProgram(alloc);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
         if (program.statements.len > 0) {
-            const maybe = try evaluator.eval(alloc, ast.Node{ .program = program }, &env);
-            if (maybe) |evaluated| {
+            const parent_node = ast.Node{ .program = program };
+            if (try evaluator.eval(arena.allocator(), parent_node, &env)) |evaluated| {
                 try evaluated.inspect(buffer_writer);
                 try buffer_writer.writeByte('\n');
             }

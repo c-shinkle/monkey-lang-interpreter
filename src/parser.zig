@@ -3,8 +3,11 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
 const ast = @import("ast.zig");
+const Expression = ast.Expression;
+const ExpressionStatement = ast.ExpressionStatement;
 const Lexer = @import("lexer.zig").Lexer;
 const token = @import("token.zig");
+const Operator = token.Operator;
 
 const ParserError = error{
     MissingLetAssign,
@@ -17,12 +20,12 @@ const ParserError = error{
     UnknownOperatorToken,
 } || Allocator.Error || std.fmt.AllocPrintError || std.fmt.ParseIntError;
 
-const PrefixParseFn = *const fn (self: *Parser, alloc: Allocator) ParserError!ast.Expression;
+const PrefixParseFn = *const fn (self: *Parser, alloc: Allocator) ParserError!Expression;
 const InfixParseFn = *const fn (
     self: *Parser,
     alloc: Allocator,
-    lhs: ast.Expression,
-) ParserError!ast.Expression;
+    lhs: Expression,
+) ParserError!Expression;
 
 const Precedence = enum {
     lowest,
@@ -182,7 +185,10 @@ pub const Parser = struct {
         return ast.ReturnStatement{ ._token = _token, .return_value = return_value };
     }
 
-    pub fn parseExpressionStatement(self: *Parser, alloc: Allocator) ParserError!ast.ExpressionStatement {
+    pub fn parseExpressionStatement(
+        self: *Parser,
+        alloc: Allocator,
+    ) ParserError!ExpressionStatement {
         const cur_token = self.cur_token;
         const expression = try self.parseExpression(alloc, Precedence.lowest);
 
@@ -190,7 +196,7 @@ pub const Parser = struct {
             self.nextToken();
         }
 
-        return ast.ExpressionStatement{ ._token = cur_token, .expression = expression };
+        return ExpressionStatement{ ._token = cur_token, .expression = expression };
     }
 
     pub fn parseBlockStatement(self: *Parser, alloc: Allocator) ParserError!ast.BlockStatement {
@@ -220,7 +226,11 @@ pub const Parser = struct {
 
     // Expression
 
-    pub fn parseExpression(self: *Parser, alloc: Allocator, precedence: Precedence) ParserError!ast.Expression {
+    pub fn parseExpression(
+        self: *Parser,
+        alloc: Allocator,
+        precedence: Precedence,
+    ) ParserError!Expression {
         const precedence_int = @intFromEnum(precedence);
         const prefix = lookupPrefixParseFns(self.cur_token.token_type) orelse {
             try self.noPrefixParseFnError(alloc, self.cur_token.token_type);
@@ -242,8 +252,8 @@ pub const Parser = struct {
         return left_exp;
     }
 
-    fn parseIdentifier(self: *const Parser, _: Allocator) ParserError!ast.Expression {
-        return ast.Expression{
+    fn parseIdentifier(self: *const Parser, _: Allocator) ParserError!Expression {
+        return Expression{
             .identifier = ast.Identifier{
                 ._token = self.cur_token,
                 .value = self.cur_token.literal,
@@ -251,26 +261,26 @@ pub const Parser = struct {
         };
     }
 
-    fn parseIntegerLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
+    fn parseIntegerLiteral(self: *Parser, _: Allocator) ParserError!Expression {
         const cur_token = self.cur_token;
         const value = try std.fmt.parseInt(i64, cur_token.literal, 10);
 
         const integer_literal = ast.IntegerLiteral{ ._token = cur_token, .value = value };
-        return ast.Expression{ .integer_literal = integer_literal };
+        return Expression{ .integer_literal = integer_literal };
     }
 
-    fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
+    fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
         const _token = self.cur_token;
         const operator = token.findOperatorByLiteral(self.cur_token.literal) orelse
             return ParserError.UnknownOperatorToken;
 
         self.nextToken();
 
-        const right = try alloc.create(ast.Expression);
+        const right = try alloc.create(Expression);
         errdefer alloc.destroy(right);
         right.* = try self.parseExpression(alloc, Precedence.prefix);
 
-        return ast.Expression{
+        return Expression{
             .prefix_expression = ast.PrefixExpression{
                 ._token = _token,
                 .operator = operator,
@@ -279,7 +289,11 @@ pub const Parser = struct {
         };
     }
 
-    fn parseInfixExpression(self: *Parser, alloc: Allocator, lhs: ast.Expression) ParserError!ast.Expression {
+    fn parseInfixExpression(
+        self: *Parser,
+        alloc: Allocator,
+        lhs: Expression,
+    ) ParserError!Expression {
         const _token = self.cur_token;
         const operator = token.findOperatorByLiteral(self.cur_token.literal) orelse
             return ParserError.UnknownOperatorToken;
@@ -287,15 +301,15 @@ pub const Parser = struct {
         const precedence = self.curPrecedence();
         self.nextToken();
 
-        const left = try alloc.create(ast.Expression);
+        const left = try alloc.create(Expression);
         errdefer alloc.destroy(left);
         left.* = lhs;
 
-        const right = try alloc.create(ast.Expression);
+        const right = try alloc.create(Expression);
         errdefer alloc.destroy(right);
         right.* = try self.parseExpression(alloc, precedence);
 
-        return ast.Expression{
+        return Expression{
             .infix_expression = ast.InfixExpression{
                 ._token = _token,
                 .left = left,
@@ -305,8 +319,8 @@ pub const Parser = struct {
         };
     }
 
-    fn parseBoolean(self: *Parser, _: Allocator) ParserError!ast.Expression {
-        return ast.Expression{
+    fn parseBoolean(self: *Parser, _: Allocator) ParserError!Expression {
+        return Expression{
             .boolean_expression = ast.Boolean{
                 ._token = self.cur_token,
                 .value = self.curTokenIs(._true),
@@ -314,7 +328,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseGroupedExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
+    fn parseGroupedExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
         self.nextToken();
 
         const exp = try self.parseExpression(alloc, Precedence.lowest);
@@ -326,14 +340,14 @@ pub const Parser = struct {
         return exp;
     }
 
-    fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
+    fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
         const _token = self.cur_token;
         if (!self.expectPeek(.lparen)) {
             return ParserError.MissingLeftParenthesis;
         }
         self.nextToken();
 
-        const condition = try alloc.create(ast.Expression);
+        const condition = try alloc.create(Expression);
         errdefer alloc.destroy(condition);
         condition.* = try self.parseExpression(alloc, Precedence.lowest);
         errdefer condition.parser_deinit(alloc);
@@ -363,7 +377,7 @@ pub const Parser = struct {
             // errdefer maybe_alt.?.parser_deinit(alloc);
         }
 
-        return ast.Expression{
+        return Expression{
             .if_expression = ast.IfExpression{
                 ._token = _token,
                 .condition = condition,
@@ -373,7 +387,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
+    fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!Expression {
         const _token = self.cur_token;
         if (!self.expectPeek(.lparen)) {
             return ParserError.MissingLeftParenthesis;
@@ -386,7 +400,7 @@ pub const Parser = struct {
         }
         const body = try self.parseBlockStatement(alloc);
 
-        return ast.Expression{
+        return Expression{
             .function_literal = ast.FunctionLiteral{
                 ._token = _token,
                 .parameters = parameters,
@@ -430,15 +444,15 @@ pub const Parser = struct {
     fn parseCallExpression(
         self: *Parser,
         alloc: Allocator,
-        lhs: ast.Expression, // Identifier or Function Literal
-    ) ParserError!ast.Expression {
-        const function = try alloc.create(ast.Expression);
+        lhs: Expression, // Identifier or Function Literal
+    ) ParserError!Expression {
+        const function = try alloc.create(Expression);
         errdefer alloc.destroy(function);
         function.* = lhs;
         const _token = self.cur_token;
 
         const arguments = try self.parseCallArguments(alloc);
-        return ast.Expression{
+        return Expression{
             .call_expression = ast.CallExpression{
                 ._token = _token,
                 .function = function,
@@ -447,8 +461,8 @@ pub const Parser = struct {
         };
     }
 
-    fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const ast.Expression {
-        var args = std.ArrayListUnmanaged(ast.Expression).empty;
+    fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expression {
+        var args = std.ArrayListUnmanaged(Expression).empty;
         errdefer {
             if (args.items.len > 0) for (args.items[1..]) |arg| {
                 arg.parser_deinit(alloc);
@@ -614,12 +628,12 @@ test "Let Statement" {
         .{ .input = "let foobar = y;", .expected_identifier = "foobar", .expected_value = "y" },
     };
 
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     inline for (let_tests) |let_test| {
-        var l = Lexer.init(let_test.input);
-        var parser = try Parser.init(&l, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var lexer = Lexer.init(let_test.input);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
 
         const stmts = program.statements;
@@ -644,12 +658,13 @@ test "Return Statement" {
         .{ .input = "return foobar;", .expected_value = "foobar" },
     };
 
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     inline for (return_tests) |return_test| {
-        var l = Lexer.init(return_test.input);
-        var parser = try Parser.init(&l, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var lexer = Lexer.init(return_test.input);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
+        _ = try parser.parseProgram(testing.allocator);
         try checkParserErrors(&parser);
 
         const stmts = program.statements;
@@ -671,16 +686,17 @@ test "Return Statement" {
 test "Identifier Expression" {
     const input = "foobar;";
 
-    var l = Lexer.init(input);
-    var parser = try Parser.init(&l, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
+    _ = try parser.parseProgram(testing.allocator);
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
-    const stmt: ast.ExpressionStatement = switch (program.statements[0]) {
+    const stmt = switch (program.statements[0]) {
         .expression_statement => |stmt| stmt,
         else => |stmt| {
             const fmt = "Expect ExpressionStatement, got {s}";
@@ -688,7 +704,7 @@ test "Identifier Expression" {
             @panic(std.fmt.comptimePrint(fmt, .{type_name}));
         },
     };
-    const ident: ast.Identifier = switch (stmt.expression) {
+    const ident = switch (stmt.expression) {
         .identifier => |ident| ident,
         else => |ident| {
             const fmt = "Expect Identifier, got {s}";
@@ -704,16 +720,17 @@ test "Identifier Expression" {
 test "Integer Literal Expression" {
     const input = "5;";
 
-    var l = Lexer.init(input);
-    var parser = try Parser.init(&l, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
+    _ = try parser.parseProgram(testing.allocator);
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
-    const stmt: ast.ExpressionStatement = switch (program.statements[0]) {
+    const stmt = switch (program.statements[0]) {
         .expression_statement => |stmt| stmt,
         else => |stmt| {
             const fmt = "Expect ExpressionStatement, got {s}";
@@ -721,7 +738,7 @@ test "Integer Literal Expression" {
             @panic(std.fmt.comptimePrint(fmt, .{type_name}));
         },
     };
-    const literal: ast.IntegerLiteral = switch (stmt.expression) {
+    const literal = switch (stmt.expression) {
         .integer_literal => |literal| literal,
         else => |exp| {
             const fmt = "Expect Integer Literal, got {s}";
@@ -736,26 +753,27 @@ test "Integer Literal Expression" {
 
 test "Prefix Expression" {
     const prefix_tests = .{
-        .{ .input = "!5;", .operator = token.ScopedTokenType(.operator).bang, .value = 5 },
-        .{ .input = "-15;", .operator = token.ScopedTokenType(.operator).minus, .value = 15 },
-        .{ .input = "!true;", .operator = token.ScopedTokenType(.operator).bang, .value = true },
-        .{ .input = "!false;", .operator = token.ScopedTokenType(.operator).bang, .value = false },
+        .{ .input = "!5;", .operator = Operator.bang, .value = 5 },
+        .{ .input = "-15;", .operator = Operator.minus, .value = 15 },
+        .{ .input = "!true;", .operator = Operator.bang, .value = true },
+        .{ .input = "!false;", .operator = Operator.bang, .value = false },
     };
 
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     inline for (prefix_tests) |prefix_test| {
-        var l = Lexer.init(prefix_test.input);
-        var parser = try Parser.init(&l, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var lexer = Lexer.init(prefix_test.input);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
+        _ = try parser.parseProgram(testing.allocator);
         try checkParserErrors(&parser);
 
         const stmt = program.statements;
         try testing.expectEqual(1, stmt.len);
 
-        const prefix_stmt: ast.ExpressionStatement = switch (stmt[0]) {
+        const prefix_stmt: ExpressionStatement = switch (stmt[0]) {
             .expression_statement => |exp_stmt| exp_stmt,
-            else => @panic("statement is not ast.ExpressionStatement"),
+            else => @panic("statement is not ExpressionStatement"),
         };
         const exp: ast.PrefixExpression = switch (prefix_stmt.expression) {
             .prefix_expression => |prefix| prefix,
@@ -772,77 +790,78 @@ test "Infix Expression" {
         .{
             .input = "5 + 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).plus,
+            .operator = Operator.plus,
             .right_value = 5,
         },
         .{
             .input = "5 - 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).minus,
+            .operator = Operator.minus,
             .right_value = 5,
         },
         .{
             .input = "5 * 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).asterisk,
+            .operator = Operator.asterisk,
             .right_value = 5,
         },
         .{
             .input = "5 / 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).slash,
+            .operator = Operator.slash,
             .right_value = 5,
         },
         .{
             .input = "5 > 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).gt,
+            .operator = Operator.gt,
             .right_value = 5,
         },
         .{
             .input = "5 < 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).lt,
+            .operator = Operator.lt,
             .right_value = 5,
         },
         .{
             .input = "5 == 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).eq,
+            .operator = Operator.eq,
             .right_value = 5,
         },
         .{
             .input = "5 != 5;",
             .left_value = 5,
-            .operator = token.ScopedTokenType(.operator).not_eq,
+            .operator = Operator.not_eq,
             .right_value = 5,
         },
         .{
             .input = "true == true",
             .left_value = true,
-            .operator = token.ScopedTokenType(.operator).eq,
+            .operator = Operator.eq,
             .right_value = true,
         },
         .{
             .input = "true != false",
             .left_value = true,
-            .operator = token.ScopedTokenType(.operator).not_eq,
+            .operator = Operator.not_eq,
             .right_value = false,
         },
         .{
             .input = "false == false",
             .left_value = false,
-            .operator = token.ScopedTokenType(.operator).eq,
+            .operator = Operator.eq,
             .right_value = false,
         },
     };
 
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     inline for (infixBoolTests) |infix_test| {
-        var l = Lexer.init(infix_test.input);
-        var parser = try Parser.init(&l, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var lexer = Lexer.init(infix_test.input);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
+        _ = try parser.parseProgram(testing.allocator);
 
         try checkParserErrors(&parser);
 
@@ -851,7 +870,7 @@ test "Infix Expression" {
 
         const exp_stmt = switch (stmts[0]) {
             .expression_statement => |exp_stmt| exp_stmt,
-            else => @panic("stmts[0] is not ast.ExpressionStatement"),
+            else => @panic("stmts[0] is not ExpressionStatement"),
         };
 
         try testInfixExpression(
@@ -970,15 +989,15 @@ test "Operator Precedence" {
         },
     };
 
-    var array_list = std.ArrayList(u8).init(testing.allocator);
-    defer array_list.deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var array_list = std.ArrayList(u8).init(arena.allocator());
     const writer = array_list.writer().any();
     for (string_tests) |string_test| {
         var lexer = Lexer.init(string_test.input);
-        var parser = try Parser.init(&lexer, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
 
         try program.string(writer);
@@ -997,12 +1016,12 @@ test "Boolean Expression" {
         .{ .input = "false;", .expected_boolean = false },
     };
 
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     for (bool_tests) |bool_test| {
         var lexer = Lexer.init(bool_test.input);
-        var parser = try Parser.init(&lexer, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
 
         const stmts = program.statements;
@@ -1019,27 +1038,25 @@ test "Boolean Expression" {
             },
             else => unreachable,
         };
-
         try testing.expectEqual(bool_test.expected_boolean, boolean_expression.value);
     }
 }
 
 test "If Expression" {
-    const input = "if (abc < y) { abc }";
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const input = "if (x < y) { x }";
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
     const exp_stmt = switch (program.statements[0]) {
         .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        else => @panic("stmts[0] is not ExpressionStatement"),
     };
-
     const if_exp = switch (exp_stmt.expression) {
         .if_expression => |if_exp| if_exp,
         else => |other| {
@@ -1049,32 +1066,32 @@ test "If Expression" {
         },
     };
 
-    const abc = [3]u8{ 'a', 'b', 'c' };
-    try testInfixExpression(if_exp.condition.*, abc, token.ScopedTokenType(.operator).lt, "y");
+    try testInfixExpression(if_exp.condition.*, "x", Operator.lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
         .expression_statement => |con_stmt| con_stmt,
-        else => @panic("if_exp.consequence.statements[0] is not ast.ExpressionStatement"),
+        else => @panic("if_exp.consequence.statements[0] is not ExpressionStatement"),
     };
-    try testIdentifier(consequence.expression, "abc");
+    try testIdentifier(consequence.expression, "x");
     try testing.expectEqual(if_exp.alternative, null);
 }
 
 test "If Else Expression" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
     const input = "if (x < y) { x } else { y }";
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
     const exp_stmt = switch (program.statements[0]) {
         .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        else => @panic("stmts[0] is not ExpressionStatement"),
     };
 
     const if_exp = switch (exp_stmt.expression) {
@@ -1086,12 +1103,12 @@ test "If Else Expression" {
         },
     };
 
-    try testInfixExpression(if_exp.condition.*, "x", token.ScopedTokenType(.operator).lt, "y");
+    try testInfixExpression(if_exp.condition.*, "x", Operator.lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
     const consequence = switch (if_exp.consequence.statements[0]) {
         .expression_statement => |con_stmt| con_stmt,
-        else => @panic("if_exp.consequence.statements[0] is not ast.ExpressionStatement"),
+        else => @panic("if_exp.consequence.statements[0] is not ExpressionStatement"),
     };
     try testIdentifier(consequence.expression, "x");
 
@@ -1099,25 +1116,26 @@ test "If Else Expression" {
     try testing.expectEqual(1, alternative.statements.len);
     const alt_stmt = switch (alternative.statements[0]) {
         .expression_statement => |alt_stmt| alt_stmt,
-        else => @panic("if_exp.alternative.statements[0] is not ast.ExpressionStatement"),
+        else => @panic("if_exp.alternative.statements[0] is not ExpressionStatement"),
     };
     try testIdentifier(alt_stmt.expression, "y");
 }
 
 test "Function Literal Expression" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
     const input = "fn(x, y) { x + y }";
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
 
     const fn_lit_exp_stmt = switch (program.statements[0]) {
         .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        else => @panic("stmts[0] is not ExpressionStatement"),
     };
 
     const fn_lit = switch (fn_lit_exp_stmt.expression) {
@@ -1131,16 +1149,16 @@ test "Function Literal Expression" {
 
     try testing.expectEqual(2, fn_lit.parameters.len);
 
-    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[0] }, "x");
-    try testLiteralExpression(ast.Expression{ .identifier = fn_lit.parameters[1] }, "y");
+    try testLiteralExpression(Expression{ .identifier = fn_lit.parameters[0] }, "x");
+    try testLiteralExpression(Expression{ .identifier = fn_lit.parameters[1] }, "y");
 
     try testing.expectEqual(1, fn_lit.body.statements.len);
 
-    const body_exp_stmt: ast.ExpressionStatement = switch (fn_lit.body.statements[0]) {
+    const body_exp_stmt = switch (fn_lit.body.statements[0]) {
         .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ast.ExpressionStatement"),
+        else => @panic("stmts[0] is not ExpressionStatement"),
     };
-    try testInfixExpression(body_exp_stmt.expression, "x", token.ScopedTokenType(.operator).plus, "y");
+    try testInfixExpression(body_exp_stmt.expression, "x", Operator.plus, "y");
 }
 
 test "Function Parameter Parsing" {
@@ -1161,17 +1179,18 @@ test "Function Parameter Parsing" {
             .expected_params = &[_][]const u8{ "x", "y", "z" },
         },
     };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     for (param_tests) |param_test| {
         var lexer = Lexer.init(param_test.input);
-        var parser = try Parser.init(&lexer, testing.allocator);
-        defer parser.deinit(testing.allocator);
-        const program = try parser.parseProgram(testing.allocator);
-        defer program.parser_deinit(testing.allocator);
+        var parser = try Parser.init(&lexer, arena.allocator());
+        const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
 
         const stmt = switch (program.statements[0]) {
             .expression_statement => |stmt| stmt,
-            else => @panic("stmts[0] is not ast.ExpressionStatement"),
+            else => @panic("stmts[0] is not ExpressionStatement"),
         };
         const function = switch (stmt.expression) {
             .function_literal => |function| function,
@@ -1183,19 +1202,20 @@ test "Function Parameter Parsing" {
         };
         try testing.expectEqual(param_test.expected_params.len, function.parameters.len);
         for (param_test.expected_params, 0..) |param, i| {
-            const exp = ast.Expression{ .identifier = function.parameters[i] };
+            const exp = Expression{ .identifier = function.parameters[i] };
             try testLiteralExpression(exp, param);
         }
     }
 }
 
 test "Call Expression Parsing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
     const input = "add(1, 2 * 3, 4 + 5);";
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, testing.allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
     try checkParserErrors(&parser);
 
     const stmts = program.statements;
@@ -1222,36 +1242,33 @@ test "Call Expression Parsing" {
     const args = call_exp.arguments;
     try testing.expectEqual(3, args.len);
     try testLiteralExpression(args[0], 1);
-    try testInfixExpression(args[1], 2, token.ScopedTokenType(.operator).asterisk, 3);
-    try testInfixExpression(args[2], 4, token.ScopedTokenType(.operator).plus, 5);
+    try testInfixExpression(args[1], 2, Operator.asterisk, 3);
+    try testInfixExpression(args[2], 4, Operator.plus, 5);
 }
 
 //Test Helpers
 
-fn testOutOfMemory(allocator: Allocator, input: []const u8) !void {
+fn testOutOfMemory(alloc: Allocator, input: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, allocator);
-    defer parser.deinit(testing.allocator);
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    _ = try parser.parseProgram(arena.allocator());
 }
 
 fn testOutOfMemoryWithParserErrors(
-    allocator: Allocator,
+    alloc: Allocator,
     input: []const u8,
     expecteds: []const []const u8,
 ) !void {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
     var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, allocator);
-    defer parser.deinit(testing.allocator);
-
-    const program = try parser.parseProgram(testing.allocator);
-    defer program.parser_deinit(testing.allocator);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    _ = try parser.parseProgram(arena.allocator());
 
     const parser_errors = parser.errors.items;
-
-    try testing.expect(expecteds.len == parser_errors.len);
-
+    try testing.expectEqual(expecteds.len, parser_errors.len);
     for (parser_errors, 0..) |parser_error, i| {
         try testing.expectEqualStrings(expecteds[i], parser_error);
     }
@@ -1286,7 +1303,7 @@ fn testLetStatement(s: ast.Statement, value: []const u8) !void {
     try testing.expectEqualStrings(value, let_stmt.name.tokenLiteral());
 }
 
-fn testIntegerLiteral(il: ast.Expression, value: i64) !void {
+fn testIntegerLiteral(il: Expression, value: i64) !void {
     const integ = switch (il) {
         .integer_literal => |integer| integer,
         else => |exp| {
@@ -1305,7 +1322,7 @@ fn testIntegerLiteral(il: ast.Expression, value: i64) !void {
     try testing.expectEqualStrings(integer_literal, integ.tokenLiteral());
 }
 
-fn testIdentifier(expression: ast.Expression, value: []const u8) !void {
+fn testIdentifier(expression: Expression, value: []const u8) !void {
     const ident = switch (expression) {
         .identifier => |ident| ident,
         else => |exp| {
@@ -1319,7 +1336,7 @@ fn testIdentifier(expression: ast.Expression, value: []const u8) !void {
     try testing.expectEqualStrings(ident.tokenLiteral(), value);
 }
 
-fn testLiteralExpression(exp: ast.Expression, value: anytype) !void {
+fn testLiteralExpression(exp: Expression, value: anytype) !void {
     const type_info = @typeInfo(@TypeOf(value));
     // std.debug.print("{}\n", .{type_info});
     switch (type_info) {
@@ -1334,12 +1351,7 @@ fn testLiteralExpression(exp: ast.Expression, value: anytype) !void {
     }
 }
 
-fn testInfixExpression(
-    exp: ast.Expression,
-    left: anytype,
-    operator: token.ScopedTokenType(.operator),
-    right: anytype,
-) !void {
+fn testInfixExpression(exp: Expression, left: anytype, operator: Operator, right: anytype) !void {
     const op_exp: ast.InfixExpression = switch (exp) {
         .infix_expression => |infix| infix,
         else => |e| {
@@ -1355,7 +1367,7 @@ fn testInfixExpression(
     try testLiteralExpression(op_exp.right.*, right);
 }
 
-fn testBooleanLiteral(exp: ast.Expression, value: bool) !void {
+fn testBooleanLiteral(exp: Expression, value: bool) !void {
     const bool_exp: ast.Boolean = switch (exp) {
         .boolean_expression => |boolean| boolean,
         else => |e| {
