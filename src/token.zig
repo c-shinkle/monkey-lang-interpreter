@@ -48,6 +48,7 @@ pub const TokenType = enum {
     illegal,
     identifier,
     int,
+    string,
 
     pub fn scope(self: TokenType) Scope {
         return switch (self) {
@@ -83,6 +84,7 @@ pub const TokenType = enum {
             .illegal,
             .identifier,
             .int,
+            .string,
             => .not_operator,
         };
     }
@@ -188,6 +190,7 @@ pub const RPAREN = ")";
 pub const LBRACE = "{";
 pub const RBRACE = "}";
 pub const EOF = "";
+// pub const DOUBLEQUOTES = "\"";
 
 test {
     std.testing.refAllDecls(@This());

@@ -496,6 +496,12 @@ pub const Parser = struct {
         return try args.toOwnedSlice(alloc);
     }
 
+    fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
+        const cur_token = self.cur_token;
+        const literal = ast.StringLiteral{ ._token = cur_token, .value = cur_token.literal };
+        return Expression{ .string_literal = literal };
+    }
+
     // Helper Methods
 
     fn nextToken(self: *Parser) void {
@@ -551,6 +557,7 @@ pub const Parser = struct {
             .lparen => parseGroupedExpression,
             ._if => parseIfExpression,
             ._function => parseFunctionLiteral,
+            .string => parseStringLiteral,
             else => null,
         };
     }
@@ -1244,6 +1251,28 @@ test "Call Expression Parsing" {
     try testLiteralExpression(args[0], 1);
     try testInfixExpression(args[1], 2, Operator.asterisk, 3);
     try testInfixExpression(args[2], 4, Operator.plus, 5);
+}
+
+test "String Literal Expression" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const input = "\"hello world\"";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+    const stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ExpressionStatement"),
+    };
+
+    try testing.expect(stmt.expression == .string_literal);
+    const literal = stmt.expression.string_literal;
+
+    try testing.expectEqualStrings("hello world", literal.value);
 }
 
 //Test Helpers

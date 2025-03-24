@@ -33,6 +33,7 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             .if_expression => |if_exp| try evalIfExpression(alloc, if_exp, env),
             .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
             .call_expression => |call_fn| try evalCallExpression(alloc, call_fn, env),
+            .string_literal => |string_lit| try evalStringLiteral(alloc, string_lit),
         },
     };
 }
@@ -399,6 +400,11 @@ fn applyFunction(
     return maybe_evaluated;
 }
 
+fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalError!?obj.Object {
+    const duped_value = try alloc.dupe(u8, string_literal.value);
+    return obj.Object{ .string = obj.String{ .value = duped_value } };
+}
+
 // Test Suite
 
 test "Out of Memory, Without Errors" {
@@ -435,6 +441,8 @@ test "Out of Memory, Without Errors" {
         \\let newAdder = fn(x) { fn(y) { x + y }; };
         \\let addTwo = newAdder(2);
         \\addTwo(1);
+        ,
+        "\"Hello, World!\"",
     };
 
     for (inputs) |input| {
@@ -747,6 +755,17 @@ test "Enclosing Environments" {
     const actual = (try testEval(input, arena.allocator())).?;
 
     try testIntegerObject(70, actual);
+}
+
+test "String Literal" {
+    const input = "\"Hello, World!\"";
+
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const actual = (try testEval(input, arena.allocator())).?;
+
+    try testing.expect(actual == .string);
+    try testing.expectEqualStrings("Hello, World!", actual.string.value);
 }
 
 // Test Helpers

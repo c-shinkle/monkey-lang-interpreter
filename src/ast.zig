@@ -305,6 +305,7 @@ pub const Expression = union(enum) {
     if_expression: IfExpression,
     function_literal: FunctionLiteral,
     call_expression: CallExpression,
+    string_literal: StringLiteral,
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
@@ -806,6 +807,39 @@ pub const CallExpression = struct {
             arg.dupe_deinit(alloc);
         }
         alloc.free(self.arguments);
+    }
+};
+
+pub const StringLiteral = struct {
+    _token: token.Token,
+    value: []const u8,
+
+    pub fn expressionNode(_: *const StringLiteral) void {}
+
+    pub fn tokenLiteral(self: *const StringLiteral) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn string(self: *const StringLiteral, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.writeAll(self._token.literal);
+    }
+
+    pub fn parser_deinit(self: *const StringLiteral, allocator: std.mem.Allocator) void {
+        _ = self; // autofix
+        _ = allocator; // autofix
+    }
+
+    pub fn dupe(self: *const StringLiteral, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        const duped_value = try alloc.dupe(u8, self.value);
+        return Expression{
+            .string_literal = StringLiteral{ ._token = duped_token, .value = duped_value },
+        };
+    }
+
+    pub fn dupe_deinit(self: *const StringLiteral, alloc: Allocator) void {
+        self._token.dupe_deinit(alloc);
+        alloc.free(self.value);
     }
 };
 

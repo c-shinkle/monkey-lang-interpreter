@@ -69,6 +69,7 @@ pub const Lexer = struct {
             ')' => Token{ .token_type = TokenType.rparen, .literal = token.RPAREN },
             '{' => Token{ .token_type = TokenType.lbrace, .literal = token.LBRACE },
             '}' => Token{ .token_type = TokenType.rbrace, .literal = token.RBRACE },
+            '"' => Token{ .token_type = TokenType.string, .literal = self.readString() },
             else => blk: {
                 if (isLetter(ch.*)) {
                     const literal = self.readIdentifier();
@@ -116,6 +117,15 @@ pub const Lexer = struct {
         else
             self.input[self.read_position];
     }
+
+    fn readString(self: *Lexer) []const u8 {
+        const start = self.position + 1;
+        while (true) {
+            self.readChar();
+            if (self.ch.* == '"' or self.ch.* == 0) break;
+        }
+        return self.input[start..self.position];
+    }
 };
 
 test "Test Next Token" {
@@ -139,6 +149,8 @@ test "Test Next Token" {
         \\
         \\10 == 10
         \\10 != 9
+        \\"foobar"
+        \\"foo bar"
     ;
 
     const expecteds = [_]struct {
@@ -428,6 +440,14 @@ test "Test Next Token" {
         .{
             .expected_type = TokenType.int,
             .expected_literal = "9",
+        },
+        .{
+            .expected_type = TokenType.string,
+            .expected_literal = "foobar",
+        },
+        .{
+            .expected_type = TokenType.string,
+            .expected_literal = "foo bar",
         },
         .{
             .expected_type = TokenType.eof,

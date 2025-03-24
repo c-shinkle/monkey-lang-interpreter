@@ -14,6 +14,7 @@ pub const NULL_OBJ = "NULL";
 pub const RETURN_VALUE_OBJ = "RETURN_VALUE";
 pub const ERROR_OBJ = "ERROR";
 pub const FUNCTION_OBJ = "FUNCTION";
+pub const STRING_OBJ = "STRING";
 
 pub const TRUE = Object{ .boolean = Boolean{ .value = true } };
 pub const FALSE = Object{ .boolean = Boolean{ .value = false } };
@@ -26,6 +27,7 @@ pub const Object = union(enum) {
     return_value: ReturnValue,
     _error: Error,
     function: Function,
+    string: String,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
@@ -35,6 +37,7 @@ pub const Object = union(enum) {
             .return_value => RETURN_VALUE_OBJ,
             ._error => ERROR_OBJ,
             .function => FUNCTION_OBJ,
+            .string => STRING_OBJ,
         };
     }
 
@@ -215,6 +218,23 @@ pub const Function = struct {
                 .env = duped_env_ptr,
             },
         };
+    }
+};
+
+pub const String = struct {
+    value: []const u8,
+
+    pub fn inspect(self: *const String, writer: AnyWriter) AnyWriter.Error!void {
+        return try writer.print("{s}", .{self.value});
+    }
+
+    pub fn deinit(self: *const String, alloc: Allocator) void {
+        alloc.free(self.value);
+    }
+
+    pub fn dupe(self: String, alloc: Allocator) Allocator.Error!Object {
+        const duped_value = try alloc.dupe(u8, self.value);
+        return Object{ .string = String{ .value = duped_value } };
     }
 };
 
