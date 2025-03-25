@@ -831,9 +831,8 @@ pub const StringLiteral = struct {
 
     pub fn dupe(self: *const StringLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
-        const duped_value = try alloc.dupe(u8, self.value);
         return Expression{
-            .string_literal = StringLiteral{ ._token = duped_token, .value = duped_value },
+            .string_literal = StringLiteral{ ._token = duped_token, .value = duped_token.literal },
         };
     }
 

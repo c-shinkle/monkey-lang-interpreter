@@ -16,7 +16,7 @@ pub const Environment = struct {
         var iter = self.store.iterator();
         while (iter.next()) |entry| {
             self.alloc.free(entry.key_ptr.*);
-            entry.value_ptr.deinit(self.alloc);
+            // entry.value_ptr.deinit(self.alloc);
         }
         self.store.deinit(self.alloc);
     }
@@ -44,8 +44,10 @@ pub const Environment = struct {
     pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Error!void {
         const key = try self.alloc.dupe(u8, name);
         errdefer self.alloc.free(key);
+        const duped_value = try value.dupe(self.alloc);
+        errdefer duped_value.deinit(self.alloc);
 
-        try self.store.put(self.alloc, key, value);
+        try self.store.put(self.alloc, key, duped_value);
     }
 
     pub fn isRootEnvironment(self: *const Environment) bool {

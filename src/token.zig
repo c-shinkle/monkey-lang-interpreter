@@ -90,7 +90,7 @@ pub const TokenType = enum {
     }
 
     pub fn isLiteralAllocated(self: TokenType) bool {
-        return self == .illegal or self == .identifier or self == .int;
+        return self == .illegal or self == .identifier or self == .int or self == .string;
     }
 };
 

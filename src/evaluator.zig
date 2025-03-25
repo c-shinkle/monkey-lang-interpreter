@@ -73,7 +73,7 @@ fn evalLetStatement(
     const child_node = ast.Node{ .expression = let_stmt.value };
     const let_value = try eval(alloc, child_node, env) orelse return null;
     if (isError(let_value)) return let_value;
-    errdefer let_value.deinit(alloc);
+    defer let_value.deinit(alloc);
 
     try env.set(let_stmt.name.value, let_value);
     return null;
@@ -400,9 +400,10 @@ fn applyFunction(
     return maybe_evaluated;
 }
 
-fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalError!?obj.Object {
-    const duped_value = try alloc.dupe(u8, string_literal.value);
-    return obj.Object{ .string = obj.String{ .value = duped_value } };
+fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalError!obj.Object {
+    const duped_value = try string_literal.dupe(alloc);
+    std.debug.assert(duped_value == .string_literal);
+    return obj.Object{ .string = obj.String{ .value = duped_value.string_literal.value } };
 }
 
 // Test Suite
@@ -758,14 +759,29 @@ test "Enclosing Environments" {
 }
 
 test "String Literal" {
-    const input = "\"Hello, World!\"";
+    var env_arena = ArenaAllocator.init(testing.allocator);
+    defer env_arena.deinit();
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const actual = (try testEval(input, arena.allocator())).?;
+    var env = Environment.init(env_arena.allocator());
 
-    try testing.expect(actual == .string);
-    try testing.expectEqualStrings("Hello, World!", actual.string.value);
+    var loop_arena = ArenaAllocator.init(testing.allocator);
+
+    var lexer = Lexer.init("let x = \"Hello, World!\";");
+    var parser = try Parser.init(&lexer, loop_arena.allocator());
+    var program = try parser.parseProgram(loop_arena.allocator());
+    var node = ast.Node{ .program = program };
+    var stmt = try eval(loop_arena.allocator(), node, &env);
+    try testing.expectEqual(null, stmt);
+    loop_arena.deinit();
+
+    loop_arena = ArenaAllocator.init(testing.allocator);
+    lexer = Lexer.init("x;");
+    parser = try Parser.init(&lexer, loop_arena.allocator());
+    program = try parser.parseProgram(loop_arena.allocator());
+    node = ast.Node{ .program = program };
+    stmt = try eval(loop_arena.allocator(), node, &env);
+    try testing.expectEqualStrings("Hello, World!", stmt.?.string.value);
+    loop_arena.deinit();
 }
 
 // Test Helpers
