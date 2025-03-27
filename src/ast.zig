@@ -358,10 +358,7 @@ pub const Identifier = struct {
         try writer.writeAll(self.value);
     }
 
-    pub fn parser_deinit(self: *const Identifier, allocator: std.mem.Allocator) void {
-        _ = self; // autofix
-        _ = allocator; // autofix
-    }
+    pub fn parser_deinit(_: *const Identifier, _: std.mem.Allocator) void {}
 
     pub fn dupe(self: *const Identifier, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
@@ -392,10 +389,7 @@ pub const IntegerLiteral = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn parser_deinit(self: *const IntegerLiteral, allocator: std.mem.Allocator) void {
-        _ = self; // autofix
-        _ = allocator; // autofix
-    }
+    pub fn parser_deinit(_: *const IntegerLiteral, _: std.mem.Allocator) void {}
 
     pub fn dupe(self: *const IntegerLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
@@ -542,10 +536,7 @@ pub const Boolean = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn parser_deinit(self: *const Boolean, allocator: std.mem.Allocator) void {
-        _ = self; // autofix
-        _ = allocator; // autofix
-    }
+    pub fn parser_deinit(_: *const Boolean, _: std.mem.Allocator) void {}
 
     pub fn dupe_deinit(self: *const Boolean, alloc: Allocator) void {
         self._token.dupe_deinit(alloc);
@@ -824,10 +815,7 @@ pub const StringLiteral = struct {
         try writer.writeAll(self._token.literal);
     }
 
-    pub fn parser_deinit(self: *const StringLiteral, allocator: std.mem.Allocator) void {
-        _ = self; // autofix
-        _ = allocator; // autofix
-    }
+    pub fn parser_deinit(_: *const StringLiteral, _: std.mem.Allocator) void {}
 
     pub fn dupe(self: *const StringLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
