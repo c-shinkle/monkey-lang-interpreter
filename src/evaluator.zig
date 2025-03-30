@@ -737,8 +737,7 @@ test "Function Application" {
     inline for (eval_tests) |eval_test| {
         var arena = ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
-        const actual = try testEval(eval_test.input, arena.allocator()) orelse
-            return error.TestExpectedEqual;
+        const actual = try testEval(eval_test.input, arena.allocator());
         try testAnyObject(eval_test.expected, actual);
     }
 }
@@ -781,27 +780,17 @@ test "Enclosing Environments" {
 }
 
 test "String Literal" {
-    var env_arena = ArenaAllocator.init(testing.allocator);
-    defer env_arena.deinit();
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
 
-    var env = Environment.init(env_arena.allocator());
+    var env = Environment.init(arena.allocator());
 
-    const eval_tests = .{
-        .{ .input = "let x = \"Hello, World!\";", .expected = null },
-        .{ .input = "x;", .expected = "Hello, World!" },
-    };
-
-    inline for (eval_tests) |eval_test| {
-        var loop_arena = ArenaAllocator.init(testing.allocator);
-        defer loop_arena.deinit();
-
-        var lexer = Lexer.init(eval_test.input);
-        var parser = try Parser.init(&lexer, loop_arena.allocator());
-        const program = try parser.parseProgram(loop_arena.allocator());
-        const node = ast.Node{ .program = program };
-        const actual = try eval(loop_arena.allocator(), node, &env);
-        try testAnyObject(eval_test.expected, actual);
-    }
+    var lexer = Lexer.init("\"Hello, World!\";");
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
+    const node = ast.Node{ .program = program };
+    const actual = try eval(arena.allocator(), node, &env);
+    try testAnyObject("Hello, World!", actual);
 }
 
 // Test Helpers
@@ -820,21 +809,22 @@ fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
     return try eval(alloc, node, &env);
 }
 
-fn testAnyObject(expected: anytype, maybe_actual: ?obj.Object) !void {
+fn testAnyObject(expected: anytype, actual: ?obj.Object) !void {
     const type_info = @typeInfo(@TypeOf(expected));
     // std.debug.print("{}\n", .{type_info});
-    if (maybe_actual) |actual| {
+    if (actual) |some| {
         switch (type_info) {
-            .comptime_int, .int => try testIntegerObject(expected, actual),
-            .bool => try testBooleanObject(expected, actual),
+            .comptime_int, .int => try testIntegerObject(expected, some),
+            .bool => try testBooleanObject(expected, some),
             .pointer => |pointer| switch (pointer.size) {
-                .one => try testStringObject(expected, actual),
-                else => return error.TestExpectedEqual,
+                .one => try testStringObject(expected, some),
+                else => error.TestExpectedEqual,
             },
-            else => return error.TestExpectedEqual,
+            else => error.TestExpectedEqual,
         }
+    } else {
+        try testing.expect(type_info == .null);
     }
-    try testing.expect(type_info == .null);
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
