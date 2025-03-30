@@ -803,7 +803,6 @@ pub const CallExpression = struct {
 
 pub const StringLiteral = struct {
     _token: token.Token,
-    value: []const u8,
 
     pub fn expressionNode(_: *const StringLiteral) void {}
 
@@ -819,14 +818,11 @@ pub const StringLiteral = struct {
 
     pub fn dupe(self: *const StringLiteral, alloc: Allocator) !Expression {
         const duped_token = try self._token.dupe(alloc);
-        return Expression{
-            .string_literal = StringLiteral{ ._token = duped_token, .value = duped_token.literal },
-        };
+        return Expression{ .string_literal = StringLiteral{ ._token = duped_token } };
     }
 
     pub fn dupe_deinit(self: *const StringLiteral, alloc: Allocator) void {
         self._token.dupe_deinit(alloc);
-        alloc.free(self.value);
     }
 };
 

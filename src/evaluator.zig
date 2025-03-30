@@ -43,11 +43,16 @@ fn evalProgram(
     stmts: []const ast.Statement,
     env: *Environment,
 ) EvalError!?obj.Object {
+    std.debug.assert(stmts.len > 0);
+
     var maybe_result: ?obj.Object = null;
 
     for (stmts) |stmt| {
-        maybe_result = try eval(alloc, ast.Node{ .statement = stmt }, env);
+        if (maybe_result) |result| {
+            result.deinit(alloc);
+        }
 
+        maybe_result = try eval(alloc, ast.Node{ .statement = stmt }, env);
         if (maybe_result) |result| switch (result) {
             .return_value => |ret_val| {
                 if (ret_val.value) |value| {
@@ -403,7 +408,7 @@ fn applyFunction(
 fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalError!obj.Object {
     const duped_value = try string_literal.dupe(alloc);
     std.debug.assert(duped_value == .string_literal);
-    return obj.Object{ .string = obj.String{ .value = duped_value.string_literal.value } };
+    return obj.Object{ .string = obj.String{ .value = duped_value.string_literal._token.literal } };
 }
 
 // Test Suite
@@ -714,9 +719,10 @@ test "Function Object" {
 }
 
 test "Function Application" {
-    const eval_tests = [_]struct { input: []const u8, expected: i64 }{
+    const eval_tests = .{
         .{ .input = "let identity = fn(x) { x } ; identity(5);", .expected = 5 },
         .{ .input = "let identity = fn(x) { return x; } ; identity(5);", .expected = 5 },
+        .{ .input = "let identity = fn(x) { return x; } ; identity(\"hey\");", .expected = "hey" },
         .{ .input = "let double = fn(x) { x * 2; }; double(5);", .expected = 10 },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5, 5);", .expected = 10 },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));", .expected = 20 },
@@ -728,12 +734,28 @@ test "Function Application" {
         , .expected = 3 },
     };
 
-    for (eval_tests) |eval_test| {
+    inline for (eval_tests) |eval_test| {
         var arena = ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
-        const actual = (try testEval(eval_test.input, arena.allocator())).?;
-        try testIntegerObject(eval_test.expected, actual);
+        const actual = try testEval(eval_test.input, arena.allocator()) orelse
+            return error.TestExpectedEqual;
+        try testAnyObject(eval_test.expected, actual);
     }
+}
+
+test "Free intermediate objects of Program" {
+    const input = "let greeting = fn() { return \"Hey!\"; }; greeting(); 3;";
+
+    var env = Environment.init(testing.allocator);
+    defer env.deinit();
+
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, testing.allocator);
+    defer parser.deinit(testing.allocator);
+    const program = try parser.parseProgram(testing.allocator);
+    defer program.parser_deinit(testing.allocator);
+
+    _ = try eval(testing.allocator, ast.Node{ .program = program }, &env);
 }
 
 test "Enclosing Environments" {
@@ -764,24 +786,22 @@ test "String Literal" {
 
     var env = Environment.init(env_arena.allocator());
 
-    var loop_arena = ArenaAllocator.init(testing.allocator);
+    const eval_tests = .{
+        .{ .input = "let x = \"Hello, World!\";", .expected = null },
+        .{ .input = "x;", .expected = "Hello, World!" },
+    };
 
-    var lexer = Lexer.init("let x = \"Hello, World!\";");
-    var parser = try Parser.init(&lexer, loop_arena.allocator());
-    var program = try parser.parseProgram(loop_arena.allocator());
-    var node = ast.Node{ .program = program };
-    var stmt = try eval(loop_arena.allocator(), node, &env);
-    try testing.expectEqual(null, stmt);
-    loop_arena.deinit();
+    inline for (eval_tests) |eval_test| {
+        var loop_arena = ArenaAllocator.init(testing.allocator);
+        defer loop_arena.deinit();
 
-    loop_arena = ArenaAllocator.init(testing.allocator);
-    lexer = Lexer.init("x;");
-    parser = try Parser.init(&lexer, loop_arena.allocator());
-    program = try parser.parseProgram(loop_arena.allocator());
-    node = ast.Node{ .program = program };
-    stmt = try eval(loop_arena.allocator(), node, &env);
-    try testing.expectEqualStrings("Hello, World!", stmt.?.string.value);
-    loop_arena.deinit();
+        var lexer = Lexer.init(eval_test.input);
+        var parser = try Parser.init(&lexer, loop_arena.allocator());
+        const program = try parser.parseProgram(loop_arena.allocator());
+        const node = ast.Node{ .program = program };
+        const actual = try eval(loop_arena.allocator(), node, &env);
+        try testAnyObject(eval_test.expected, actual);
+    }
 }
 
 // Test Helpers
@@ -798,6 +818,23 @@ fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
 
     const node = ast.Node{ .program = program };
     return try eval(alloc, node, &env);
+}
+
+fn testAnyObject(expected: anytype, maybe_actual: ?obj.Object) !void {
+    const type_info = @typeInfo(@TypeOf(expected));
+    // std.debug.print("{}\n", .{type_info});
+    if (maybe_actual) |actual| {
+        switch (type_info) {
+            .comptime_int, .int => try testIntegerObject(expected, actual),
+            .bool => try testBooleanObject(expected, actual),
+            .pointer => |pointer| switch (pointer.size) {
+                .one => try testStringObject(expected, actual),
+                else => return error.TestExpectedEqual,
+            },
+            else => return error.TestExpectedEqual,
+        }
+    }
+    try testing.expect(type_info == .null);
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
@@ -821,6 +858,14 @@ fn testNullObject(object: obj.Object) !void {
         std.debug.print("object is not NULL. got={any}\n", .{object});
         return error.TestExpectedEqual;
     }
+}
+
+fn testStringObject(expected: []const u8, actual: obj.Object) !void {
+    if (actual != .string) {
+        std.debug.print("object is not String. got={any}\n", .{actual});
+        return error.TestExpectedEqual;
+    }
+    try testing.expectEqualStrings(expected, actual.string.value);
 }
 
 fn testOutOfMemory(alloc: Allocator, input: []const u8) !void {

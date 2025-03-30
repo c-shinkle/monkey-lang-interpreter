@@ -497,9 +497,7 @@ pub const Parser = struct {
     }
 
     fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
-        const cur_token = self.cur_token;
-        const literal = ast.StringLiteral{ ._token = cur_token, .value = cur_token.literal };
-        return Expression{ .string_literal = literal };
+        return Expression{ .string_literal = ast.StringLiteral{ ._token = self.cur_token } };
     }
 
     // Helper Methods
@@ -1272,7 +1270,7 @@ test "String Literal Expression" {
     try testing.expect(stmt.expression == .string_literal);
     const literal = stmt.expression.string_literal;
 
-    try testing.expectEqualStrings("hello world", literal.value);
+    try testing.expectEqualStrings("hello world", literal._token.literal);
 }
 
 //Test Helpers

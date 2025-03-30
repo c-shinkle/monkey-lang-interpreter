@@ -16,7 +16,7 @@ pub const Environment = struct {
         var iter = self.store.iterator();
         while (iter.next()) |entry| {
             self.alloc.free(entry.key_ptr.*);
-            // entry.value_ptr.deinit(self.alloc);
+            entry.value_ptr.deinit(self.alloc);
         }
         self.store.deinit(self.alloc);
     }
