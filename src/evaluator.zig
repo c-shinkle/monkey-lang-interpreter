@@ -721,12 +721,17 @@ test "Function Object" {
 test "Function Application" {
     const eval_tests = .{
         .{ .input = "let identity = fn(x) { x } ; identity(5);", .expected = 5 },
+        .{ .input = "let identity = fn(x) { x } ; identity(false);", .expected = false },
+        .{ .input = "let identity = fn(x) { x } ; identity(\"hey\");", .expected = "hey" },
         .{ .input = "let identity = fn(x) { return x; } ; identity(5);", .expected = 5 },
+        .{ .input = "let identity = fn(x) { return x; } ; identity(true);", .expected = true },
         .{ .input = "let identity = fn(x) { return x; } ; identity(\"hey\");", .expected = "hey" },
         .{ .input = "let double = fn(x) { x * 2; }; double(5);", .expected = 10 },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5, 5);", .expected = 10 },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));", .expected = 20 },
         .{ .input = "fn(x) { x; }(5)", .expected = 5 },
+        .{ .input = "fn(x) { x; }(false)", .expected = false },
+        .{ .input = "fn(x) { x; }(\"hey\")", .expected = "hey" },
         .{ .input = 
         \\let newAdder = fn(x) { fn(y) { x + y }; };
         \\let addTwo = newAdder(2);
