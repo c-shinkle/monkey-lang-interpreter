@@ -174,6 +174,8 @@ fn evalInfixOperatorExpression(
         return try evalIntegerInfixExpression(alloc, op, left_obj.integer, right_obj.integer);
     } else if (left_obj == .boolean and right_obj == .boolean) {
         return try evalBooleanInfixExpression(alloc, op, left_obj.boolean, right_obj.boolean);
+    } else if (left_obj == .string and right_obj == .string) {
+        return try evalStringInfixExpression(alloc, op, left_obj.string, right_obj.string);
     } else if (!left_obj.eql(right_obj)) {
         const args = .{ left_obj._type(), token.getLiteralByOperator(op), right_obj._type() };
         return try newError(alloc, "type mismatch: {s} {s} {s}", args);
@@ -222,6 +224,22 @@ fn evalBooleanInfixExpression(
             break :blk try newError(alloc, "unknown operator: {s} {s} {s}", args);
         },
     };
+}
+
+fn evalStringInfixExpression(
+    alloc: Allocator,
+    operator: token.Operator,
+    left: obj.String,
+    right: obj.String,
+) EvalError!obj.Object {
+    if (operator != .plus) {
+        const fmt = "unknown operator: {s} {s} {s}";
+        const args = .{ obj.STRING_OBJ, token.getLiteralByOperator(operator), obj.STRING_OBJ };
+        return try newError(alloc, fmt, args);
+    }
+
+    const value = try std.mem.concat(alloc, u8, &.{ left.value, right.value });
+    return obj.Object{ .string = obj.String{ .value = value } };
 }
 
 fn evalIfExpression(
@@ -449,6 +467,7 @@ test "Out of Memory, Without Errors" {
         \\addTwo(1);
         ,
         "\"Hello, World!\"",
+        "\"Hello, \" + \"World!\"",
     };
 
     for (inputs) |input| {
@@ -533,6 +552,20 @@ test "Boolean Expression" {
     }
 }
 
+test "String Expression" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var env = Environment.init(arena.allocator());
+
+    var lexer = Lexer.init("\"Hello, World!\";");
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
+    const node = ast.Node{ .program = program };
+    const actual = try eval(arena.allocator(), node, &env);
+    try testAnyObject("Hello, World!", actual);
+}
+
 test "Bang Operator" {
     const eval_tests = [_]struct { input: []const u8, expected: bool }{
         .{ .input = "!true", .expected = false },
@@ -549,6 +582,28 @@ test "Bang Operator" {
         const actual = (try testEval(eval_test.input, arena.allocator())).?;
         try testBooleanObject(eval_test.expected, actual);
     }
+}
+
+test "String Concatenation" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var env = Environment.init(arena.allocator());
+
+    const input = "\"Hello\" + \" \" + \"World!\"";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena.allocator());
+    const program = try parser.parseProgram(arena.allocator());
+    const node = ast.Node{ .program = program };
+    const actual = try eval(arena.allocator(), node, &env) orelse
+        return error.TestExpectedEqual;
+
+    if (actual != .string) {
+        std.debug.print("object is not String. got={any}\n", .{actual});
+        return error.TestExpectedEqual;
+    }
+
+    try testing.expectEqualStrings("Hello World!", actual.string.value);
 }
 
 test "If Else Expressions" {
@@ -660,6 +715,10 @@ test "Error Handling" {
             .input = "foobar;",
             .expected = "identifier not found: foobar",
         },
+        .{
+            .input = "\"Hello\" - \"World\"",
+            .expected = "unknown operator: STRING - STRING",
+        },
     };
 
     for (eval_tests) |eval_test| {
@@ -728,6 +787,7 @@ test "Function Application" {
         .{ .input = "let identity = fn(x) { return x; } ; identity(\"hey\");", .expected = "hey" },
         .{ .input = "let double = fn(x) { x * 2; }; double(5);", .expected = 10 },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5, 5);", .expected = 10 },
+        .{ .input = "let add = fn(x, y) { x + y; }; add(\"a\", \"b\");", .expected = "ab" },
         .{ .input = "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));", .expected = 20 },
         .{ .input = "fn(x) { x; }(5)", .expected = 5 },
         .{ .input = "fn(x) { x; }(false)", .expected = false },
@@ -782,20 +842,6 @@ test "Enclosing Environments" {
     const actual = (try testEval(input, arena.allocator())).?;
 
     try testIntegerObject(70, actual);
-}
-
-test "String Literal" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    var env = Environment.init(arena.allocator());
-
-    var lexer = Lexer.init("\"Hello, World!\";");
-    var parser = try Parser.init(&lexer, arena.allocator());
-    const program = try parser.parseProgram(arena.allocator());
-    const node = ast.Node{ .program = program };
-    const actual = try eval(arena.allocator(), node, &env);
-    try testAnyObject("Hello, World!", actual);
 }
 
 // Test Helpers
