@@ -5,6 +5,7 @@ const AnyWriter = std.io.AnyWriter;
 
 const ast = @import("ast.zig");
 const Environment = @import("environment.zig").Environment;
+const builtins = @import("_builtin.zig");
 
 const ObjectType = []const u8;
 
@@ -15,6 +16,7 @@ pub const RETURN_VALUE_OBJ = "RETURN_VALUE";
 pub const ERROR_OBJ = "ERROR";
 pub const FUNCTION_OBJ = "FUNCTION";
 pub const STRING_OBJ = "STRING";
+pub const BUILTIN_OBJ = "BUILTIN";
 
 pub const TRUE = Object{ .boolean = Boolean{ .value = true } };
 pub const FALSE = Object{ .boolean = Boolean{ .value = false } };
@@ -28,6 +30,7 @@ pub const Object = union(enum) {
     _error: Error,
     function: Function,
     string: String,
+    builtin: Builtin,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
@@ -38,6 +41,7 @@ pub const Object = union(enum) {
             ._error => ERROR_OBJ,
             .function => FUNCTION_OBJ,
             .string => STRING_OBJ,
+            .builtin => BUILTIN_OBJ,
         };
     }
 
@@ -235,6 +239,20 @@ pub const String = struct {
     pub fn dupe(self: String, alloc: Allocator) Allocator.Error!Object {
         const duped_value = try alloc.dupe(u8, self.value);
         return Object{ .string = String{ .value = duped_value } };
+    }
+};
+
+pub const Builtin = struct {
+    _fn: builtins.BuiltinFnPointer,
+
+    pub fn inspect(_: *const Builtin, writer: AnyWriter) AnyWriter.Error!void {
+        return try writer.writeAll("builtin function");
+    }
+
+    pub fn deinit(_: *const Builtin, _: Allocator) void {}
+
+    pub fn dupe(self: Builtin, _: Allocator) Allocator.Error!Object {
+        return Object{ .builtin = self };
     }
 };
 

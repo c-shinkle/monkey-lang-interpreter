@@ -3,6 +3,7 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
+const _builtin = @import("_builtin.zig");
 const ast = @import("ast.zig");
 const Environment = @import("environment.zig").Environment;
 const Lexer = @import("lexer.zig").Lexer;
@@ -10,7 +11,7 @@ const obj = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
 
-const EvalError = Allocator.Error || std.fmt.AllocPrintError;
+const EvalError = _builtin.BuiltinError || Allocator.Error || std.fmt.AllocPrintError;
 
 pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalError!?obj.Object {
     return switch (parent_node) {
@@ -269,7 +270,11 @@ fn isTruthy(maybe_object: ?obj.Object) bool {
     } else true;
 }
 
-fn newError(alloc: Allocator, comptime fmt: []const u8, args: anytype) EvalError!obj.Object {
+pub fn newError(
+    alloc: Allocator,
+    comptime fmt: []const u8,
+    args: anytype,
+) std.fmt.AllocPrintError!obj.Object {
     const message = try std.fmt.allocPrint(alloc, fmt, args);
     return obj.Object{ ._error = obj.Error{ .message = message } };
 }
@@ -281,8 +286,11 @@ fn isError(maybe_object: ?obj.Object) bool {
 fn evalIdentifier(alloc: Allocator, ident: ast.Identifier, env: *Environment) EvalError!obj.Object {
     if (env.get(ident.value)) |identifier_value| {
         return try identifier_value.dupe(alloc);
+    } else if (_builtin.builtin_map.get(ident.value)) |_builtin_value| {
+        return _builtin_value;
+    } else {
+        return try newError(alloc, "identifier not found: {s}", .{ident.value});
     }
-    return try newError(alloc, "identifier not found: {s}", .{ident.value});
 }
 
 fn evalFunctionLiteral(
@@ -346,17 +354,18 @@ fn evalCallExpression(
     }
     if (args.len == 1 and isError(args[0])) return args[0];
 
-    if (evaluated != .function) {
-        return try newError(alloc, "not a function: {}", .{evaluated});
-    }
-    return applyFunction(alloc, evaluated.function, args);
+    return switch (evaluated) {
+        .function => |func| applyFunction(alloc, func, args),
+        .builtin => |builtin| try builtin._fn(alloc, args),
+        else => try newError(alloc, "not a function: {}", .{evaluated}),
+    };
 }
 
 fn evalExpressions(
     alloc: Allocator,
     exps: []const ast.Expression,
     env: *Environment,
-) Allocator.Error![]const obj.Object {
+) EvalError![]const obj.Object {
     var evaluateds = std.ArrayListUnmanaged(obj.Object).empty;
     errdefer {
         for (evaluateds.items) |object| object.deinit(alloc);
@@ -842,6 +851,43 @@ test "Enclosing Environments" {
     const actual = (try testEval(input, arena.allocator())).?;
 
     try testIntegerObject(70, actual);
+}
+
+test "Builtin Functions, no Errors" {
+    const builtin_tests = [_]struct { input: []const u8, expected: i64 }{
+        .{ .input = "len(\"\");", .expected = 0 },
+        .{ .input = "len(\"four\");", .expected = 4 },
+        .{ .input = "len(\"hello world\");", .expected = 11 },
+    };
+
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    for (builtin_tests) |builtin_test| {
+        const actual = (try testEval(builtin_test.input, arena.allocator())).?;
+        try testIntegerObject(builtin_test.expected, actual);
+    }
+}
+
+test "Builtin Functions, with Errors" {
+    const builtin_tests = [_]struct { input: []const u8, expected: []const u8 }{
+        .{
+            .input = "len(1);",
+            .expected = "argument to 'len' not supported, got INTEGER",
+        },
+        .{
+            .input = "len(\"one\", \"two\");",
+            .expected = "wrong number of arguments. got=2, want=1",
+        },
+    };
+
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    for (builtin_tests) |builtin_test| {
+        const actual = (try testEval(builtin_test.input, arena.allocator())).?;
+
+        try testing.expect(actual == ._error);
+        try testing.expectEqualStrings(builtin_test.expected, actual._error.message);
+    }
 }
 
 // Test Helpers
