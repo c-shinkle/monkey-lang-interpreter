@@ -3,22 +3,25 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const is_x86_linux = target.result.cpu.arch.isX86() and target.result.os.tag == .linux;
     const test_step = b.step("test", "Run unit tests");
 
-    compile_unit_tests(b, "token", target, optimize, test_step);
-    compile_unit_tests(b, "lexer", target, optimize, test_step);
-    compile_unit_tests(b, "ast", target, optimize, test_step);
-    compile_unit_tests(b, "parser", target, optimize, test_step);
-    compile_unit_tests(b, "object", target, optimize, test_step);
-    compile_unit_tests(b, "evaluator", target, optimize, test_step);
+    compile_unit_tests(b, "token", is_x86_linux, target, optimize, test_step);
+    compile_unit_tests(b, "lexer", is_x86_linux, target, optimize, test_step);
+    compile_unit_tests(b, "ast", is_x86_linux, target, optimize, test_step);
+    compile_unit_tests(b, "parser", is_x86_linux, target, optimize, test_step);
+    compile_unit_tests(b, "object", is_x86_linux, target, optimize, test_step);
+    compile_unit_tests(b, "evaluator", is_x86_linux, target, optimize, test_step);
 
-    const is_x86_linux = target.result.cpu.arch.isX86() and target.result.os.tag == .linux;
     const exe = b.addExecutable(.{
         .name = "monkey-lang-interpreter",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
         .use_llvm = !is_x86_linux,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
     });
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
@@ -30,15 +33,20 @@ pub fn build(b: *std.Build) void {
 fn compile_unit_tests(
     b: *std.Build,
     comptime name: []const u8,
+    is_x86_linux: bool,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     test_step: *std.Build.Step,
 ) void {
     const unit_tests = b.addTest(.{
         .name = std.fmt.comptimePrint("{s}_tests", .{name}),
-        .root_source_file = b.path(std.fmt.comptimePrint("src/{s}.zig", .{name})),
-        .target = target,
-        .optimize = optimize,
+        .use_llvm = !is_x86_linux,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(std.fmt.comptimePrint("src/{s}.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
     });
 
     b.installArtifact(unit_tests);
