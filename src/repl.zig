@@ -10,42 +10,38 @@ const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
 const Environment = @import("environment.zig").Environment;
 
+const c_imports = @cImport({
+    @cInclude("stdio.h");
+    @cInclude("readline/readline.h");
+    @cInclude("readline/history.h");
+});
+
 pub fn start(stdout: AnyWriter) !void {
-    var stdin_reader = std.io.getStdIn().reader();
-
-    const size: usize = 4096;
-    var stream_buffer: [size]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&stream_buffer);
-
-    var stdout_buffer = std.io.BufferedWriter(size, AnyWriter){ .unbuffered_writer = stdout };
+    var stdout_buffer = std.io.BufferedWriter(4096, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
 
-    var env_alloc = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+    var env_alloc = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer env_alloc.deinit();
     var env = Environment.init(env_alloc.allocator());
 
-    try stdout.print(">> ", .{});
-    while (true) : ({
-        try buffer_writer.print(">> ", .{});
-        try stdout_buffer.flush();
-        stream.reset();
-    }) {
-        stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size) catch |e| return switch (e) {
-            error.EndOfStream => try stdout.writeByte('\n'),
-            else => e,
-        };
-        if (std.mem.eql(u8, stream.getWritten(), "exit")) {
-            return;
-        }
+    while (true) : (try stdout_buffer.flush()) {
+        const raw_input = c_imports.readline(">> ") orelse return;
+        defer c_imports.rl_free(raw_input);
+        const slice_input = std.mem.span(raw_input);
+        if (std.mem.eql(u8, slice_input, "exit")) return;
+        if (slice_input.len == 0) continue;
+        c_imports.add_history(raw_input);
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
-        defer arena.deinit();
-        var lexer = Lexer.init(stream.getWritten());
-        var parser = try Parser.init(&lexer, arena.allocator());
-        const program = try parser.parseProgram(arena.allocator());
+        var loop_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+        defer loop_arena.deinit();
+        const loop_alloc = loop_arena.allocator();
+
+        var lexer = Lexer.init(slice_input);
+        var parser = try Parser.init(&lexer, loop_alloc);
+        const program = try parser.parseProgram(loop_alloc);
         if (program.statements.len > 0) {
             const parent_node = ast.Node{ .program = program };
-            if (try evaluator.eval(arena.allocator(), parent_node, &env)) |evaluated| {
+            if (try evaluator.eval(loop_alloc, parent_node, &env)) |evaluated| {
                 try evaluated.inspect(buffer_writer);
                 try buffer_writer.writeByte('\n');
             }
