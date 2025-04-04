@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    exe.linkSystemLibrary("readline");
+    exe.linkSystemLibrary("editline");
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

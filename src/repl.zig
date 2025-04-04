@@ -10,11 +10,7 @@ const Parser = @import("parser.zig").Parser;
 const token = @import("token.zig");
 const Environment = @import("environment.zig").Environment;
 
-const c_imports = @cImport({
-    @cInclude("stdio.h");
-    @cInclude("readline/readline.h");
-    @cInclude("readline/history.h");
-});
+const c_imports = @cImport(@cInclude("editline/readline.h"));
 
 pub fn start(stdout: AnyWriter) !void {
     var stdout_buffer = std.io.BufferedWriter(4096, AnyWriter){ .unbuffered_writer = stdout };
@@ -26,11 +22,11 @@ pub fn start(stdout: AnyWriter) !void {
 
     while (true) : (try stdout_buffer.flush()) {
         const raw_input = c_imports.readline(">> ") orelse return;
-        defer c_imports.rl_free(raw_input);
+        // defer c_imports.rl_free(raw_input);
         const slice_input = std.mem.span(raw_input);
         if (std.mem.eql(u8, slice_input, "exit")) return;
         if (slice_input.len == 0) continue;
-        c_imports.add_history(raw_input);
+        _ = c_imports.add_history(raw_input);
 
         var loop_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer loop_arena.deinit();
