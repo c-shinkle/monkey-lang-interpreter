@@ -306,6 +306,8 @@ pub const Expression = union(enum) {
     function_literal: FunctionLiteral,
     call_expression: CallExpression,
     string_literal: StringLiteral,
+    array_literal: ArrayLiteral,
+    index_expression: IndexExpression,
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
@@ -823,6 +825,118 @@ pub const StringLiteral = struct {
 
     pub fn dupe_deinit(self: *const StringLiteral, alloc: Allocator) void {
         self._token.dupe_deinit(alloc);
+    }
+};
+
+pub const ArrayLiteral = struct {
+    _token: token.Token,
+    elements: []const Expression,
+
+    pub fn expresssionNode(_: *const ArrayLiteral) void {}
+
+    pub fn tokenLiteral(self: *const ArrayLiteral) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn string(self: *const ArrayLiteral, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.writeByte(token.LBRACKET[0]);
+
+        for (self.elements) |*element| {
+            try element.string(writer);
+        }
+
+        try writer.writeByte(token.RBRACKET[0]);
+    }
+
+    pub fn parser_deinit(self: *const ArrayLiteral, alloc: Allocator) void {
+        alloc.free(self.elements);
+    }
+
+    pub fn dupe(self: *const ArrayLiteral, alloc: Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+
+        var duped_elements = try alloc.alloc(Expression, self.elements.len);
+        for (self.elements, 0..) |element, i| {
+            duped_elements[i] = try element.dupe(alloc);
+        }
+
+        return Expression{
+            .array_literal = ArrayLiteral{
+                ._token = duped_token,
+                .elements = duped_elements,
+            },
+        };
+    }
+
+    pub fn dupe_deinit(self: *const ArrayLiteral, alloc: Allocator) void {
+        self._token.dupe_deinit(alloc);
+
+        for (self.elements) |element| {
+            element.dupe_deinit(alloc);
+        }
+    }
+};
+
+pub const IndexExpression = struct {
+    _token: token.Token,
+    left: *Expression,
+    index: *Expression,
+
+    pub fn expresionNode(_: *const IndexExpression) void {}
+
+    pub fn tokenLiteral(self: *const IndexExpression) []const u8 {
+        return self._token.literal;
+    }
+
+    pub fn string(self: *const IndexExpression, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.writeByte('(');
+        try self.left.string(writer);
+        try writer.writeByte('[');
+        try self.index.string(writer);
+        try writer.writeByte(']');
+    }
+
+    pub fn parser_deinit(self: *const IndexExpression, alloc: std.mem.Allocator) void {
+        self.left.parser_deinit(alloc);
+        alloc.destroy(self.left);
+
+        self.index.parser_deinit(alloc);
+        alloc.destroy(self.index);
+    }
+
+    pub fn dupe(self: *const IndexExpression, alloc: std.mem.Allocator) !Expression {
+        const duped_token = try self._token.dupe(alloc);
+        errdefer duped_token.dupe_deinit(alloc);
+
+        const duped_left = try self.left.dupe(alloc);
+        errdefer duped_left.dupe_deinit(alloc);
+        const duped_left_ptr = try alloc.create(Expression);
+        errdefer alloc.destroy(duped_left_ptr);
+        duped_left_ptr.* = duped_left;
+
+        const duped_right = try self.index.dupe(alloc);
+        errdefer duped_right.dupe_deinit(alloc);
+        const duped_right_ptr = try alloc.create(Expression);
+        errdefer alloc.destroy(duped_right_ptr);
+        duped_right_ptr.* = duped_right;
+
+        return Expression{
+            .index_expression = IndexExpression{
+                ._token = duped_token,
+                .left = duped_left_ptr,
+                .index = duped_right_ptr,
+            },
+        };
+    }
+
+    pub fn dupe_deinit(self: *const IndexExpression, alloc: Allocator) void {
+        self._token.dupe_deinit(alloc);
+
+        self.left.dupe_deinit(alloc);
+        alloc.destroy(self.left);
+
+        self.index.dupe_deinit(alloc);
+        alloc.destroy(self.index);
     }
 };
 

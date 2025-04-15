@@ -35,6 +35,8 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
             .call_expression => |call_fn| try evalCallExpression(alloc, call_fn, env),
             .string_literal => |string_lit| try evalStringLiteral(alloc, string_lit),
+            .array_literal => unreachable,
+            .index_expression => unreachable,
         },
     };
 }

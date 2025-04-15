@@ -49,6 +49,8 @@ pub const TokenType = enum {
     identifier,
     int,
     string,
+    lbracket,
+    rbracket,
 
     pub fn scope(self: TokenType) Scope {
         return switch (self) {
@@ -79,6 +81,8 @@ pub const TokenType = enum {
             .rparen,
             .lbrace,
             .rbrace,
+            .lbracket,
+            .rbracket,
             .eof,
             // Value
             .illegal,
@@ -189,6 +193,8 @@ pub const LPAREN = "(";
 pub const RPAREN = ")";
 pub const LBRACE = "{";
 pub const RBRACE = "}";
+pub const LBRACKET = "[";
+pub const RBRACKET = "]";
 pub const EOF = "";
 // pub const DOUBLEQUOTES = "\"";
 
