@@ -5,10 +5,13 @@ const Allocator = std.mem.Allocator;
 const ast = @import("ast.zig");
 const Expression = ast.Expression;
 const ExpressionStatement = ast.ExpressionStatement;
-const Lexer = @import("lexer.zig").Lexer;
-const _token = @import("token.zig");
-const TokenType = _token.TokenType;
-const Operator = _token.Operator;
+const Lexer = @import("Lexer.zig");
+const Token = @import("Token.zig");
+const TokenType = Token.TokenType;
+const Operator = Token.Operator;
+const findOperatorByLiteral = Token.findOperatorByLiteral;
+
+const Parser = @This();
 
 const ParserError = error{
     MissingLetAssign,
@@ -52,600 +55,598 @@ fn getPrecedence(_type: TokenType) Precedence {
     };
 }
 
-pub const Parser = struct {
-    lexer: *Lexer,
-    cur_token: _token.Token,
-    peek_token: _token.Token,
-    errors: std.ArrayListUnmanaged([]const u8),
+lexer: *Lexer,
+cur_token: Token,
+peek_token: Token,
+errors: std.ArrayListUnmanaged([]const u8),
 
-    // Initialization
+// Initialization
 
-    pub fn init(lexer: *Lexer, alloc: Allocator) ParserError!Parser {
-        var p = Parser{
-            .lexer = lexer,
-            .cur_token = undefined,
-            .peek_token = undefined,
-            .errors = .empty,
-        };
-        errdefer p.deinit(alloc);
+pub fn init(lexer: *Lexer, alloc: Allocator) ParserError!Parser {
+    var p = Parser{
+        .lexer = lexer,
+        .cur_token = undefined,
+        .peek_token = undefined,
+        .errors = .empty,
+    };
+    errdefer p.deinit(alloc);
 
-        p.nextToken();
-        p.nextToken();
+    p.nextToken();
+    p.nextToken();
 
-        return p;
+    return p;
+}
+
+pub fn deinit(self: *Parser, alloc: Allocator) void {
+    for (self.errors.items) |msg| {
+        alloc.free(msg);
     }
 
-    pub fn deinit(self: *Parser, alloc: Allocator) void {
-        for (self.errors.items) |msg| {
-            alloc.free(msg);
+    self.errors.deinit(alloc);
+}
+
+// Program
+
+pub fn parseProgram(self: *Parser, alloc: Allocator) ParserError!ast.Program {
+    var list = std.ArrayListUnmanaged(ast.Statement).empty;
+    errdefer {
+        for (list.items) |stmt| {
+            stmt.parser_deinit(alloc);
         }
-
-        self.errors.deinit(alloc);
+        list.deinit(alloc);
     }
 
-    // Program
-
-    pub fn parseProgram(self: *Parser, alloc: Allocator) ParserError!ast.Program {
-        var list = std.ArrayListUnmanaged(ast.Statement).empty;
+    while (self.cur_token.token_type != .eof) {
+        const maybe_stmt = self.parseStatement(alloc);
         errdefer {
-            for (list.items) |stmt| {
-                stmt.parser_deinit(alloc);
-            }
-            list.deinit(alloc);
-        }
-
-        while (self.cur_token.token_type != .eof) {
-            const maybe_stmt = self.parseStatement(alloc);
-            errdefer {
-                if (maybe_stmt) |stmt| {
-                    stmt.parser_deinit(alloc);
-                } else |_| {}
-            }
-
             if (maybe_stmt) |stmt| {
-                try list.append(alloc, stmt);
-            } else |err| switch (err) {
-                ParserError.MissingLeftBrace,
-                ParserError.MissingLeftParenthesis,
-                ParserError.MissingLetAssign,
-                ParserError.MissingLetIdentifier,
-                ParserError.MissingRightBrace,
-                ParserError.MissingRightBracket,
-                ParserError.MissingRightParenthesis,
-                ParserError.UnknownOperatorToken,
-                ParserError.UnknownPrefixToken,
-                => {},
-                ParserError.InvalidCharacter, ParserError.Overflow => {
-                    const fmt = "could not parse {s} as integer";
-                    const args = .{self.cur_token.literal};
-                    const msg = try std.fmt.allocPrint(alloc, fmt, args);
-                    errdefer alloc.free(msg);
-                    try self.errors.append(alloc, msg);
-                },
-                ParserError.OutOfMemory => return ParserError.OutOfMemory,
-            }
-
-            self.nextToken();
+                stmt.parser_deinit(alloc);
+            } else |_| {}
         }
 
-        return ast.Program{ .statements = try list.toOwnedSlice(alloc) };
-    }
-
-    // Statement
-
-    fn parseStatement(self: *Parser, alloc: Allocator) ParserError!ast.Statement {
-        return switch (self.cur_token.token_type) {
-            .let => ast.Statement{
-                .let_statement = try self.parseLetStatement(alloc),
+        if (maybe_stmt) |stmt| {
+            try list.append(alloc, stmt);
+        } else |err| switch (err) {
+            ParserError.MissingLeftBrace,
+            ParserError.MissingLeftParenthesis,
+            ParserError.MissingLetAssign,
+            ParserError.MissingLetIdentifier,
+            ParserError.MissingRightBrace,
+            ParserError.MissingRightBracket,
+            ParserError.MissingRightParenthesis,
+            ParserError.UnknownOperatorToken,
+            ParserError.UnknownPrefixToken,
+            => {},
+            ParserError.InvalidCharacter, ParserError.Overflow => {
+                const fmt = "could not parse {s} as integer";
+                const args = .{self.cur_token.literal};
+                const msg = try std.fmt.allocPrint(alloc, fmt, args);
+                errdefer alloc.free(msg);
+                try self.errors.append(alloc, msg);
             },
-            ._return => ast.Statement{
-                .return_statement = try self.parseReturnStatement(alloc),
-            },
-            else => ast.Statement{
-                .expression_statement = try self.parseExpressionStatement(alloc),
-            },
-        };
-    }
-
-    fn parseLetStatement(self: *Parser, alloc: Allocator) ParserError!ast.LetStatement {
-        const let_token = self.cur_token;
-
-        if (!self.expectPeek(.identifier)) {
-            try self.peekErrors(alloc, .identifier);
-            return ParserError.MissingLetIdentifier;
+            ParserError.OutOfMemory => return ParserError.OutOfMemory,
         }
 
-        const name = ast.Identifier{
+        self.nextToken();
+    }
+
+    return ast.Program{ .statements = try list.toOwnedSlice(alloc) };
+}
+
+// Statement
+
+fn parseStatement(self: *Parser, alloc: Allocator) ParserError!ast.Statement {
+    return switch (self.cur_token.token_type) {
+        .let => ast.Statement{
+            .let_statement = try self.parseLetStatement(alloc),
+        },
+        ._return => ast.Statement{
+            .return_statement = try self.parseReturnStatement(alloc),
+        },
+        else => ast.Statement{
+            .expression_statement = try self.parseExpressionStatement(alloc),
+        },
+    };
+}
+
+fn parseLetStatement(self: *Parser, alloc: Allocator) ParserError!ast.LetStatement {
+    const let_token = self.cur_token;
+
+    if (!self.expectPeek(.identifier)) {
+        try self.peekErrors(alloc, .identifier);
+        return ParserError.MissingLetIdentifier;
+    }
+
+    const name = ast.Identifier{
+        .token = self.cur_token,
+        .value = self.cur_token.literal,
+    };
+
+    if (!self.expectPeek(.assign)) {
+        try self.peekErrors(alloc, .assign);
+        return ParserError.MissingLetAssign;
+    }
+
+    self.nextToken();
+
+    const value = try self.parseExpression(alloc, Precedence.lowest);
+
+    if (self.peekTokenIs(.semicolon)) {
+        self.nextToken();
+    }
+
+    return ast.LetStatement{ .token = let_token, .name = name, .value = value };
+}
+
+pub fn parseReturnStatement(self: *Parser, alloc: Allocator) ParserError!ast.ReturnStatement {
+    const token = self.cur_token;
+
+    self.nextToken();
+
+    const return_value = try self.parseExpression(alloc, Precedence.lowest);
+
+    if (self.peekTokenIs(.semicolon)) {
+        self.nextToken();
+    }
+
+    return ast.ReturnStatement{ .token = token, .return_value = return_value };
+}
+
+pub fn parseExpressionStatement(
+    self: *Parser,
+    alloc: Allocator,
+) ParserError!ExpressionStatement {
+    const cur_token = self.cur_token;
+    const expression = try self.parseExpression(alloc, Precedence.lowest);
+
+    if (self.peekTokenIs(.semicolon)) {
+        self.nextToken();
+    }
+
+    return ExpressionStatement{ .token = cur_token, .expression = expression };
+}
+
+pub fn parseBlockStatement(self: *Parser, alloc: Allocator) ParserError!ast.BlockStatement {
+    const token = self.cur_token;
+    var statements = std.ArrayListUnmanaged(ast.Statement).empty;
+    errdefer {
+        for (statements.items) |stmt| {
+            stmt.parser_deinit(alloc);
+        }
+        statements.deinit(alloc);
+    }
+    self.nextToken();
+
+    while (!self.curTokenIs(.rbrace) and
+        !self.curTokenIs(.eof)) : (self.nextToken())
+    {
+        const statement = try self.parseStatement(alloc);
+        errdefer statement.parser_deinit(alloc);
+        try statements.append(alloc, statement);
+    }
+
+    return ast.BlockStatement{
+        .token = token,
+        .statements = try statements.toOwnedSlice(alloc),
+    };
+}
+
+// Expression
+
+pub fn parseExpression(
+    self: *Parser,
+    alloc: Allocator,
+    precedence: Precedence,
+) ParserError!Expression {
+    const precedence_int = @intFromEnum(precedence);
+    const prefix = lookupPrefixParseFns(self.cur_token.token_type) orelse {
+        try self.noPrefixParseFnError(alloc, self.cur_token.token_type);
+        return ParserError.UnknownPrefixToken;
+    };
+
+    var left_exp = try prefix(self, alloc);
+
+    while (!self.peekTokenIs(.semicolon) and
+        precedence_int < @intFromEnum(self.peekPrecedence()))
+    {
+        errdefer left_exp.parser_deinit(alloc);
+
+        const infix = lookupInfixParseFns(self.peek_token.token_type) orelse return left_exp;
+        self.nextToken();
+        left_exp = try infix(self, alloc, left_exp);
+    }
+
+    return left_exp;
+}
+
+fn parseIdentifier(self: *const Parser, _: Allocator) ParserError!Expression {
+    return Expression{
+        .identifier = ast.Identifier{
             .token = self.cur_token,
             .value = self.cur_token.literal,
-        };
+        },
+    };
+}
 
-        if (!self.expectPeek(.assign)) {
-            try self.peekErrors(alloc, .assign);
-            return ParserError.MissingLetAssign;
-        }
+fn parseIntegerLiteral(self: *Parser, _: Allocator) ParserError!Expression {
+    const cur_token = self.cur_token;
+    const value = try std.fmt.parseInt(i64, cur_token.literal, 10);
 
-        self.nextToken();
+    const integer_literal = ast.IntegerLiteral{ .token = cur_token, .value = value };
+    return Expression{ .integer_literal = integer_literal };
+}
 
-        const value = try self.parseExpression(alloc, Precedence.lowest);
+fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
+    const token = self.cur_token;
+    const operator = findOperatorByLiteral(self.cur_token.literal) orelse
+        return ParserError.UnknownOperatorToken;
 
-        if (self.peekTokenIs(.semicolon)) {
-            self.nextToken();
-        }
+    self.nextToken();
 
-        return ast.LetStatement{ .token = let_token, .name = name, .value = value };
-    }
+    const right = try alloc.create(Expression);
+    errdefer alloc.destroy(right);
+    right.* = try self.parseExpression(alloc, Precedence.prefix);
 
-    pub fn parseReturnStatement(self: *Parser, alloc: Allocator) ParserError!ast.ReturnStatement {
-        const token = self.cur_token;
-
-        self.nextToken();
-
-        const return_value = try self.parseExpression(alloc, Precedence.lowest);
-
-        if (self.peekTokenIs(.semicolon)) {
-            self.nextToken();
-        }
-
-        return ast.ReturnStatement{ .token = token, .return_value = return_value };
-    }
-
-    pub fn parseExpressionStatement(
-        self: *Parser,
-        alloc: Allocator,
-    ) ParserError!ExpressionStatement {
-        const cur_token = self.cur_token;
-        const expression = try self.parseExpression(alloc, Precedence.lowest);
-
-        if (self.peekTokenIs(.semicolon)) {
-            self.nextToken();
-        }
-
-        return ExpressionStatement{ .token = cur_token, .expression = expression };
-    }
-
-    pub fn parseBlockStatement(self: *Parser, alloc: Allocator) ParserError!ast.BlockStatement {
-        const token = self.cur_token;
-        var statements = std.ArrayListUnmanaged(ast.Statement).empty;
-        errdefer {
-            for (statements.items) |stmt| {
-                stmt.parser_deinit(alloc);
-            }
-            statements.deinit(alloc);
-        }
-        self.nextToken();
-
-        while (!self.curTokenIs(.rbrace) and
-            !self.curTokenIs(.eof)) : (self.nextToken())
-        {
-            const statement = try self.parseStatement(alloc);
-            errdefer statement.parser_deinit(alloc);
-            try statements.append(alloc, statement);
-        }
-
-        return ast.BlockStatement{
+    return Expression{
+        .prefix_expression = ast.PrefixExpression{
             .token = token,
-            .statements = try statements.toOwnedSlice(alloc),
-        };
+            .operator = operator,
+            .right = right,
+        },
+    };
+}
+
+fn parseInfixExpression(
+    self: *Parser,
+    alloc: Allocator,
+    lhs: Expression,
+) ParserError!Expression {
+    const token = self.cur_token;
+    const operator = findOperatorByLiteral(self.cur_token.literal) orelse
+        return ParserError.UnknownOperatorToken;
+
+    const precedence = self.curPrecedence();
+    self.nextToken();
+
+    const left = try alloc.create(Expression);
+    errdefer alloc.destroy(left);
+    left.* = lhs;
+
+    const right = try alloc.create(Expression);
+    errdefer alloc.destroy(right);
+    right.* = try self.parseExpression(alloc, precedence);
+
+    return Expression{
+        .infix_expression = ast.InfixExpression{
+            .token = token,
+            .left = left,
+            .operator = operator,
+            .right = right,
+        },
+    };
+}
+
+fn parseBoolean(self: *Parser, _: Allocator) ParserError!Expression {
+    return Expression{
+        .boolean_expression = ast.Boolean{
+            .token = self.cur_token,
+            .value = self.curTokenIs(._true),
+        },
+    };
+}
+
+fn parseGroupedExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
+    self.nextToken();
+
+    const exp = try self.parseExpression(alloc, Precedence.lowest);
+
+    if (!self.expectPeek(.rparen)) {
+        return ParserError.MissingRightParenthesis;
     }
 
-    // Expression
+    return exp;
+}
 
-    pub fn parseExpression(
-        self: *Parser,
-        alloc: Allocator,
-        precedence: Precedence,
-    ) ParserError!Expression {
-        const precedence_int = @intFromEnum(precedence);
-        const prefix = lookupPrefixParseFns(self.cur_token.token_type) orelse {
-            try self.noPrefixParseFnError(alloc, self.cur_token.token_type);
-            return ParserError.UnknownPrefixToken;
-        };
+fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
+    const token = self.cur_token;
+    if (!self.expectPeek(.lparen)) {
+        return ParserError.MissingLeftParenthesis;
+    }
+    self.nextToken();
 
-        var left_exp = try prefix(self, alloc);
+    const condition = try alloc.create(Expression);
+    errdefer alloc.destroy(condition);
+    condition.* = try self.parseExpression(alloc, Precedence.lowest);
+    errdefer condition.parser_deinit(alloc);
 
-        while (!self.peekTokenIs(.semicolon) and
-            precedence_int < @intFromEnum(self.peekPrecedence()))
-        {
-            errdefer left_exp.parser_deinit(alloc);
-
-            const infix = lookupInfixParseFns(self.peek_token.token_type) orelse return left_exp;
-            self.nextToken();
-            left_exp = try infix(self, alloc, left_exp);
-        }
-
-        return left_exp;
+    if (!self.expectPeek(.rparen)) {
+        return ParserError.MissingRightParenthesis;
+    }
+    if (!self.expectPeek(.lbrace)) {
+        return ParserError.MissingLeftBrace;
     }
 
-    fn parseIdentifier(self: *const Parser, _: Allocator) ParserError!Expression {
-        return Expression{
-            .identifier = ast.Identifier{
-                .token = self.cur_token,
-                .value = self.cur_token.literal,
-            },
-        };
-    }
+    const consequence = try alloc.create(ast.BlockStatement);
+    errdefer alloc.destroy(consequence);
+    consequence.* = try self.parseBlockStatement(alloc);
+    errdefer consequence.parser_deinit(alloc);
 
-    fn parseIntegerLiteral(self: *Parser, _: Allocator) ParserError!Expression {
-        const cur_token = self.cur_token;
-        const value = try std.fmt.parseInt(i64, cur_token.literal, 10);
-
-        const integer_literal = ast.IntegerLiteral{ .token = cur_token, .value = value };
-        return Expression{ .integer_literal = integer_literal };
-    }
-
-    fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
-        const token = self.cur_token;
-        const operator = _token.findOperatorByLiteral(self.cur_token.literal) orelse
-            return ParserError.UnknownOperatorToken;
-
+    var maybe_alt: ?*ast.BlockStatement = null;
+    if (self.peekTokenIs(._else)) {
         self.nextToken();
 
-        const right = try alloc.create(Expression);
-        errdefer alloc.destroy(right);
-        right.* = try self.parseExpression(alloc, Precedence.prefix);
-
-        return Expression{
-            .prefix_expression = ast.PrefixExpression{
-                .token = token,
-                .operator = operator,
-                .right = right,
-            },
-        };
-    }
-
-    fn parseInfixExpression(
-        self: *Parser,
-        alloc: Allocator,
-        lhs: Expression,
-    ) ParserError!Expression {
-        const token = self.cur_token;
-        const operator = _token.findOperatorByLiteral(self.cur_token.literal) orelse
-            return ParserError.UnknownOperatorToken;
-
-        const precedence = self.curPrecedence();
-        self.nextToken();
-
-        const left = try alloc.create(Expression);
-        errdefer alloc.destroy(left);
-        left.* = lhs;
-
-        const right = try alloc.create(Expression);
-        errdefer alloc.destroy(right);
-        right.* = try self.parseExpression(alloc, precedence);
-
-        return Expression{
-            .infix_expression = ast.InfixExpression{
-                .token = token,
-                .left = left,
-                .operator = operator,
-                .right = right,
-            },
-        };
-    }
-
-    fn parseBoolean(self: *Parser, _: Allocator) ParserError!Expression {
-        return Expression{
-            .boolean_expression = ast.Boolean{
-                .token = self.cur_token,
-                .value = self.curTokenIs(._true),
-            },
-        };
-    }
-
-    fn parseGroupedExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
-        self.nextToken();
-
-        const exp = try self.parseExpression(alloc, Precedence.lowest);
-
-        if (!self.expectPeek(.rparen)) {
-            return ParserError.MissingRightParenthesis;
-        }
-
-        return exp;
-    }
-
-    fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
-        const token = self.cur_token;
-        if (!self.expectPeek(.lparen)) {
-            return ParserError.MissingLeftParenthesis;
-        }
-        self.nextToken();
-
-        const condition = try alloc.create(Expression);
-        errdefer alloc.destroy(condition);
-        condition.* = try self.parseExpression(alloc, Precedence.lowest);
-        errdefer condition.parser_deinit(alloc);
-
-        if (!self.expectPeek(.rparen)) {
-            return ParserError.MissingRightParenthesis;
-        }
         if (!self.expectPeek(.lbrace)) {
             return ParserError.MissingLeftBrace;
         }
-
-        const consequence = try alloc.create(ast.BlockStatement);
-        errdefer alloc.destroy(consequence);
-        consequence.* = try self.parseBlockStatement(alloc);
-        errdefer consequence.parser_deinit(alloc);
-
-        var maybe_alt: ?*ast.BlockStatement = null;
-        if (self.peekTokenIs(._else)) {
-            self.nextToken();
-
-            if (!self.expectPeek(.lbrace)) {
-                return ParserError.MissingLeftBrace;
-            }
-            maybe_alt = try alloc.create(ast.BlockStatement);
-            errdefer alloc.destroy(maybe_alt.?);
-            maybe_alt.?.* = try self.parseBlockStatement(alloc);
-            // errdefer maybe_alt.?.parser_deinit(alloc);
-        }
-
-        return Expression{
-            .if_expression = ast.IfExpression{
-                .token = token,
-                .condition = condition,
-                .consequence = consequence,
-                .alternative = maybe_alt,
-            },
-        };
+        maybe_alt = try alloc.create(ast.BlockStatement);
+        errdefer alloc.destroy(maybe_alt.?);
+        maybe_alt.?.* = try self.parseBlockStatement(alloc);
+        // errdefer maybe_alt.?.parser_deinit(alloc);
     }
 
-    fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!Expression {
-        const token = self.cur_token;
-        if (!self.expectPeek(.lparen)) {
-            return ParserError.MissingLeftParenthesis;
-        }
-        const parameters = try self.parseFunctionParameters(alloc);
-        errdefer alloc.free(parameters);
+    return Expression{
+        .if_expression = ast.IfExpression{
+            .token = token,
+            .condition = condition,
+            .consequence = consequence,
+            .alternative = maybe_alt,
+        },
+    };
+}
 
-        if (!self.expectPeek(.lbrace)) {
-            return error.MissingLeftBrace;
-        }
-        const body = try self.parseBlockStatement(alloc);
-
-        return Expression{
-            .function_literal = ast.FunctionLiteral{
-                .token = token,
-                .parameters = parameters,
-                .body = body,
-            },
-        };
+fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!Expression {
+    const token = self.cur_token;
+    if (!self.expectPeek(.lparen)) {
+        return ParserError.MissingLeftParenthesis;
     }
+    const parameters = try self.parseFunctionParameters(alloc);
+    errdefer alloc.free(parameters);
 
-    fn parseFunctionParameters(self: *Parser, alloc: Allocator) ParserError![]ast.Identifier {
-        var identifiers = std.ArrayListUnmanaged(ast.Identifier).empty;
-        errdefer identifiers.deinit(alloc);
+    if (!self.expectPeek(.lbrace)) {
+        return error.MissingLeftBrace;
+    }
+    const body = try self.parseBlockStatement(alloc);
 
-        if (self.peekTokenIs(.rparen)) {
-            self.nextToken();
-            return try identifiers.toOwnedSlice(alloc);
-        }
+    return Expression{
+        .function_literal = ast.FunctionLiteral{
+            .token = token,
+            .parameters = parameters,
+            .body = body,
+        },
+    };
+}
 
+fn parseFunctionParameters(self: *Parser, alloc: Allocator) ParserError![]ast.Identifier {
+    var identifiers = std.ArrayListUnmanaged(ast.Identifier).empty;
+    errdefer identifiers.deinit(alloc);
+
+    if (self.peekTokenIs(.rparen)) {
         self.nextToken();
+        return try identifiers.toOwnedSlice(alloc);
+    }
 
+    self.nextToken();
+
+    try identifiers.append(alloc, ast.Identifier{
+        .token = self.cur_token,
+        .value = self.cur_token.literal,
+    });
+
+    while (self.peekTokenIs(.comma)) {
+        self.nextToken();
+        self.nextToken();
         try identifiers.append(alloc, ast.Identifier{
             .token = self.cur_token,
             .value = self.cur_token.literal,
         });
-
-        while (self.peekTokenIs(.comma)) {
-            self.nextToken();
-            self.nextToken();
-            try identifiers.append(alloc, ast.Identifier{
-                .token = self.cur_token,
-                .value = self.cur_token.literal,
-            });
-        }
-
-        if (!self.expectPeek(.rparen)) {
-            return ParserError.MissingRightParenthesis;
-        }
-
-        return try identifiers.toOwnedSlice(alloc);
     }
 
-    fn parseCallExpression(
-        self: *Parser,
-        alloc: Allocator,
-        lhs: Expression, // Identifier or Function Literal
-    ) ParserError!Expression {
-        const function = try alloc.create(Expression);
-        errdefer alloc.destroy(function);
-        function.* = lhs;
-        const token = self.cur_token;
+    if (!self.expectPeek(.rparen)) {
+        return ParserError.MissingRightParenthesis;
+    }
 
-        const arguments = try self.parseCallArguments(alloc);
-        return Expression{
-            .call_expression = ast.CallExpression{
-                .token = token,
-                .function = function,
-                .arguments = arguments,
-            },
+    return try identifiers.toOwnedSlice(alloc);
+}
+
+fn parseCallExpression(
+    self: *Parser,
+    alloc: Allocator,
+    lhs: Expression, // Identifier or Function Literal
+) ParserError!Expression {
+    const function = try alloc.create(Expression);
+    errdefer alloc.destroy(function);
+    function.* = lhs;
+    const token = self.cur_token;
+
+    const arguments = try self.parseCallArguments(alloc);
+    return Expression{
+        .call_expression = ast.CallExpression{
+            .token = token,
+            .function = function,
+            .arguments = arguments,
+        },
+    };
+}
+
+fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expression {
+    var args = std.ArrayListUnmanaged(Expression).empty;
+    errdefer {
+        if (args.items.len > 0) for (args.items[1..]) |arg| {
+            arg.parser_deinit(alloc);
         };
+        args.deinit(alloc);
     }
 
-    fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expression {
-        var args = std.ArrayListUnmanaged(Expression).empty;
-        errdefer {
-            if (args.items.len > 0) for (args.items[1..]) |arg| {
-                arg.parser_deinit(alloc);
-            };
-            args.deinit(alloc);
-        }
-
-        if (self.peekTokenIs(.rparen)) {
-            self.nextToken();
-            return try args.toOwnedSlice(alloc);
-        }
-
+    if (self.peekTokenIs(.rparen)) {
         self.nextToken();
-
-        const first_exp = try self.parseExpression(alloc, Precedence.lowest);
-        errdefer first_exp.parser_deinit(alloc);
-        try args.append(alloc, first_exp);
-
-        while (self.peekTokenIs(.comma)) {
-            self.nextToken();
-            self.nextToken();
-            const loop_exp = try self.parseExpression(alloc, Precedence.lowest);
-            errdefer loop_exp.parser_deinit(alloc);
-            try args.append(alloc, loop_exp);
-        }
-
-        if (!self.expectPeek(.rparen)) {
-            return ParserError.MissingRightParenthesis;
-        }
-
         return try args.toOwnedSlice(alloc);
     }
 
-    fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
-        return Expression{ .string_literal = ast.StringLiteral{ .token = self.cur_token } };
-    }
+    self.nextToken();
 
-    fn parseArrayLiteral(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
-        const token = self.cur_token;
+    const first_exp = try self.parseExpression(alloc, Precedence.lowest);
+    errdefer first_exp.parser_deinit(alloc);
+    try args.append(alloc, first_exp);
 
-        const elements = try parseExpressionList(self, TokenType.rbracket, alloc);
-
-        const array_literal = ast.ArrayLiteral{ .token = token, .elements = elements };
-        return Expression{ .array_literal = array_literal };
-    }
-
-    fn parseExpressionList(
-        self: *Parser,
-        end: TokenType,
-        alloc: Allocator,
-    ) ParserError![]const ast.Expression {
-        var list: std.ArrayListUnmanaged(ast.Expression) = .empty;
-
-        if (self.peekTokenIs(end)) {
-            self.nextToken();
-            return try list.toOwnedSlice(alloc);
-        }
-
+    while (self.peekTokenIs(.comma)) {
         self.nextToken();
-        const first = try self.parseExpression(alloc, Precedence.lowest);
-        // errdefer first.parser_deinit(alloc);
-        try list.append(alloc, first);
+        self.nextToken();
+        const loop_exp = try self.parseExpression(alloc, Precedence.lowest);
+        errdefer loop_exp.parser_deinit(alloc);
+        try args.append(alloc, loop_exp);
+    }
 
-        while (self.peekTokenIs(TokenType.comma)) {
-            self.nextToken();
-            self.nextToken();
+    if (!self.expectPeek(.rparen)) {
+        return ParserError.MissingRightParenthesis;
+    }
 
-            const next = try self.parseExpression(alloc, Precedence.lowest);
-            // errdefer next.parser_deinit(alloc);
-            try list.append(alloc, next);
-        }
+    return try args.toOwnedSlice(alloc);
+}
 
-        if (!self.expectPeek(end)) {
-            return ParserError.MissingRightBracket;
-        }
+fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
+    return Expression{ .string_literal = ast.StringLiteral{ .token = self.cur_token } };
+}
 
+fn parseArrayLiteral(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
+    const token = self.cur_token;
+
+    const elements = try parseExpressionList(self, TokenType.rbracket, alloc);
+
+    const array_literal = ast.ArrayLiteral{ .token = token, .elements = elements };
+    return Expression{ .array_literal = array_literal };
+}
+
+fn parseExpressionList(
+    self: *Parser,
+    end: TokenType,
+    alloc: Allocator,
+) ParserError![]const ast.Expression {
+    var list: std.ArrayListUnmanaged(ast.Expression) = .empty;
+
+    if (self.peekTokenIs(end)) {
+        self.nextToken();
         return try list.toOwnedSlice(alloc);
     }
 
-    fn parseIndexExpression(
-        self: *Parser,
-        alloc: Allocator,
-        left: ast.Expression,
-    ) ParserError!ast.Expression {
-        const token = self.cur_token;
+    self.nextToken();
+    const first = try self.parseExpression(alloc, Precedence.lowest);
+    // errdefer first.parser_deinit(alloc);
+    try list.append(alloc, first);
+
+    while (self.peekTokenIs(TokenType.comma)) {
+        self.nextToken();
         self.nextToken();
 
-        const index = try alloc.create(ast.Expression);
-        errdefer alloc.destroy(index);
-        index.* = try self.parseExpression(alloc, Precedence.lowest);
-
-        if (!self.expectPeek(TokenType.rbracket)) {
-            return ParserError.MissingRightBracket;
-        }
-
-        const left_ptr = try alloc.create(ast.Expression);
-        errdefer alloc.destroy(left_ptr);
-        left_ptr.* = left;
-
-        return ast.Expression{
-            .index_expression = ast.IndexExpression{
-                .token = token,
-                .index = index,
-                .left = left_ptr,
-            },
-        };
+        const next = try self.parseExpression(alloc, Precedence.lowest);
+        // errdefer next.parser_deinit(alloc);
+        try list.append(alloc, next);
     }
 
-    // Helper Methods
-
-    fn nextToken(self: *Parser) void {
-        self.cur_token = self.peek_token;
-        self.peek_token = self.lexer.nextToken();
+    if (!self.expectPeek(end)) {
+        return ParserError.MissingRightBracket;
     }
 
-    fn curTokenIs(self: *const Parser, t: TokenType) bool {
-        return self.cur_token.token_type == t;
+    return try list.toOwnedSlice(alloc);
+}
+
+fn parseIndexExpression(
+    self: *Parser,
+    alloc: Allocator,
+    left: ast.Expression,
+) ParserError!ast.Expression {
+    const token = self.cur_token;
+    self.nextToken();
+
+    const index = try alloc.create(ast.Expression);
+    errdefer alloc.destroy(index);
+    index.* = try self.parseExpression(alloc, Precedence.lowest);
+
+    if (!self.expectPeek(TokenType.rbracket)) {
+        return ParserError.MissingRightBracket;
     }
 
-    fn peekTokenIs(self: *const Parser, t: TokenType) bool {
-        return self.peek_token.token_type == t;
-    }
+    const left_ptr = try alloc.create(ast.Expression);
+    errdefer alloc.destroy(left_ptr);
+    left_ptr.* = left;
 
-    fn expectPeek(self: *Parser, token: TokenType) bool {
-        if (self.peekTokenIs(token)) {
-            self.nextToken();
-            return true;
-        } else {
-            return false;
-        }
-    }
+    return ast.Expression{
+        .index_expression = ast.IndexExpression{
+            .token = token,
+            .index = index,
+            .left = left_ptr,
+        },
+    };
+}
 
-    fn peekErrors(self: *Parser, alloc: Allocator, t: TokenType) !void {
-        const fmt = "expected next token to be {any}, got {any} instead";
-        const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token.token_type });
-        errdefer alloc.free(msg);
-        try self.errors.append(alloc, msg);
-    }
+// Helper Methods
 
-    fn noPrefixParseFnError(self: *Parser, alloc: Allocator, t: TokenType) !void {
-        const fmt = "no prefix parse function for {any} found";
-        const msg = try std.fmt.allocPrint(alloc, fmt, .{t});
-        errdefer alloc.free(msg);
-        try self.errors.append(alloc, msg);
-    }
+fn nextToken(self: *Parser) void {
+    self.cur_token = self.peek_token;
+    self.peek_token = self.lexer.nextToken();
+}
 
-    fn peekPrecedence(self: *const Parser) Precedence {
-        return getPrecedence(self.peek_token.token_type);
-    }
+fn curTokenIs(self: *const Parser, t: TokenType) bool {
+    return self.cur_token.token_type == t;
+}
 
-    fn curPrecedence(self: *const Parser) Precedence {
-        return getPrecedence(self.cur_token.token_type);
-    }
+fn peekTokenIs(self: *const Parser, t: TokenType) bool {
+    return self.peek_token.token_type == t;
+}
 
-    fn lookupPrefixParseFns(token_type: TokenType) ?PrefixParseFn {
-        return switch (token_type) {
-            .identifier => parseIdentifier,
-            .int => parseIntegerLiteral,
-            .bang, .minus => parsePrefixExpression,
-            ._true, ._false => parseBoolean,
-            .lparen => parseGroupedExpression,
-            ._if => parseIfExpression,
-            ._function => parseFunctionLiteral,
-            .string => parseStringLiteral,
-            .lbracket => parseArrayLiteral,
-            else => null,
-        };
+fn expectPeek(self: *Parser, token: TokenType) bool {
+    if (self.peekTokenIs(token)) {
+        self.nextToken();
+        return true;
+    } else {
+        return false;
     }
+}
 
-    fn lookupInfixParseFns(token_type: TokenType) ?InfixParseFn {
-        return switch (token_type) {
-            .plus, .minus, .slash, .asterisk, .eq, .not_eq, .lt, .gt => parseInfixExpression,
-            .lparen => parseCallExpression,
-            .lbracket => parseIndexExpression,
-            else => null,
-        };
-    }
-};
+fn peekErrors(self: *Parser, alloc: Allocator, t: TokenType) !void {
+    const fmt = "expected next token to be {any}, got {any} instead";
+    const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token.token_type });
+    errdefer alloc.free(msg);
+    try self.errors.append(alloc, msg);
+}
+
+fn noPrefixParseFnError(self: *Parser, alloc: Allocator, t: TokenType) !void {
+    const fmt = "no prefix parse function for {any} found";
+    const msg = try std.fmt.allocPrint(alloc, fmt, .{t});
+    errdefer alloc.free(msg);
+    try self.errors.append(alloc, msg);
+}
+
+fn peekPrecedence(self: *const Parser) Precedence {
+    return getPrecedence(self.peek_token.token_type);
+}
+
+fn curPrecedence(self: *const Parser) Precedence {
+    return getPrecedence(self.cur_token.token_type);
+}
+
+fn lookupPrefixParseFns(token_type: TokenType) ?PrefixParseFn {
+    return switch (token_type) {
+        .identifier => parseIdentifier,
+        .int => parseIntegerLiteral,
+        .bang, .minus => parsePrefixExpression,
+        ._true, ._false => parseBoolean,
+        .lparen => parseGroupedExpression,
+        ._if => parseIfExpression,
+        ._function => parseFunctionLiteral,
+        .string => parseStringLiteral,
+        .lbracket => parseArrayLiteral,
+        else => null,
+    };
+}
+
+fn lookupInfixParseFns(token_type: TokenType) ?InfixParseFn {
+    return switch (token_type) {
+        .plus, .minus, .slash, .asterisk, .eq, .not_eq, .lt, .gt => parseInfixExpression,
+        .lparen => parseCallExpression,
+        .lbracket => parseIndexExpression,
+        else => null,
+    };
+}
 
 // Test Suite
 
@@ -691,10 +692,10 @@ test "Out of Memory, with Parser errors" {
     ;
 
     const expecteds = [_][]const u8{
-        "expected next token to be token.TokenType.assign, got token.TokenType.int instead",
-        "expected next token to be token.TokenType.identifier, got token.TokenType.assign instead",
-        "no prefix parse function for token.TokenType.assign found",
-        "expected next token to be token.TokenType.identifier, got token.TokenType.int instead",
+        "expected next token to be Token.TokenType.assign, got Token.TokenType.int instead",
+        "expected next token to be Token.TokenType.identifier, got Token.TokenType.assign instead",
+        "no prefix parse function for Token.TokenType.assign found",
+        "expected next token to be Token.TokenType.identifier, got Token.TokenType.int instead",
     };
 
     try testing.checkAllAllocationFailures(
@@ -1544,4 +1545,8 @@ fn testBooleanLiteral(exp: Expression, value: bool) !void {
     const actual = try std.fmt.allocPrint(testing.allocator, "{any}", .{bool_exp.value});
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(bool_exp.tokenLiteral(), actual);
+}
+
+test {
+    std.testing.refAllDecls(Parser);
 }

@@ -6,12 +6,16 @@ pub fn build(b: *std.Build) void {
     const is_x86_linux = target.result.cpu.arch.isX86() and target.result.os.tag == .linux;
     const test_step = b.step("test", "Run unit tests");
 
-    compile_unit_tests(b, "token", is_x86_linux, target, optimize, test_step);
-    compile_unit_tests(b, "lexer", is_x86_linux, target, optimize, test_step);
-    compile_unit_tests(b, "ast", is_x86_linux, target, optimize, test_step);
-    compile_unit_tests(b, "parser", is_x86_linux, target, optimize, test_step);
-    compile_unit_tests(b, "object", is_x86_linux, target, optimize, test_step);
-    compile_unit_tests(b, "evaluator", is_x86_linux, target, optimize, test_step);
+    compile_unit_tests(b, "Token", target, optimize, test_step);
+    compile_unit_tests(b, "Lexer", target, optimize, test_step);
+    compile_unit_tests(b, "Parser", target, optimize, test_step);
+    compile_unit_tests(b, "Environment", target, optimize, test_step);
+
+    compile_unit_tests(b, "ast", target, optimize, test_step);
+    compile_unit_tests(b, "object", target, optimize, test_step);
+    compile_unit_tests(b, "evaluator", target, optimize, test_step);
+
+    const editline_dep = b.dependency("editline", .{ .target = target, .optimize = optimize });
 
     const exe = b.addExecutable(.{
         .name = "monkey-lang-interpreter",
@@ -23,9 +27,9 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    const editline_dep = b.dependency("editline", .{ .target = target, .optimize = optimize });
     exe.linkLibrary(editline_dep.artifact("editline"));
     b.installArtifact(exe);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     const run_step = b.step("run", "Run the app");
@@ -35,11 +39,11 @@ pub fn build(b: *std.Build) void {
 fn compile_unit_tests(
     b: *std.Build,
     comptime name: []const u8,
-    is_x86_linux: bool,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     test_step: *std.Build.Step,
 ) void {
+    const is_x86_linux = target.result.cpu.arch.isX86() and target.result.os.tag == .linux;
     const unit_tests = b.addTest(.{
         .name = std.fmt.comptimePrint("{s}_tests", .{name}),
         .use_llvm = !is_x86_linux,

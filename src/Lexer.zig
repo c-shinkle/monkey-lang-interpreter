@@ -1,134 +1,132 @@
 const std = @import("std");
 const testing = std.testing;
 
-const token = @import("token.zig");
+const Token = @import("Token.zig");
+const TokenType = Token.TokenType;
 
-const Token = token.Token;
-const TokenType = token.TokenType;
+const Lexer = @This();
 
-pub const Lexer = struct {
-    input: []const u8,
-    position: usize,
-    read_position: usize,
-    ch: *const u8,
+input: []const u8,
+position: usize,
+read_position: usize,
+ch: *const u8,
 
-    pub fn init(input: []const u8) Lexer {
-        var l = Lexer{
-            .input = input,
-            .position = 0,
-            .read_position = 0,
-            .ch = &0,
-        };
-        l.readChar();
-        return l;
+pub fn init(input: []const u8) Lexer {
+    var l = Lexer{
+        .input = input,
+        .position = 0,
+        .read_position = 0,
+        .ch = &0,
+    };
+    l.readChar();
+    return l;
+}
+
+fn readChar(self: *Lexer) void {
+    if (self.read_position >= self.input.len) {
+        self.ch = &0;
+    } else {
+        self.ch = &self.input[self.read_position];
     }
+    self.position = self.read_position;
+    self.read_position += 1;
+}
 
-    fn readChar(self: *Lexer) void {
-        if (self.read_position >= self.input.len) {
-            self.ch = &0;
-        } else {
-            self.ch = &self.input[self.read_position];
-        }
-        self.position = self.read_position;
-        self.read_position += 1;
-    }
+pub fn nextToken(self: *Lexer) Token {
+    self.skipWhitespace();
 
-    pub fn nextToken(self: *Lexer) Token {
-        self.skipWhitespace();
+    const ch = self.ch;
+    const tok: Token = switch (ch.*) {
+        0 => Token{ .token_type = TokenType.eof, .literal = Token.EOF },
+        '=' => blk: {
+            if (self.peekChar() == '=') {
+                self.readChar();
+                break :blk Token{ .token_type = TokenType.eq, .literal = Token.EQ };
+            }
+            break :blk Token{ .token_type = TokenType.assign, .literal = Token.ASSIGN };
+        },
+        '+' => Token{ .token_type = TokenType.plus, .literal = Token.PLUS },
+        '-' => Token{ .token_type = TokenType.minus, .literal = Token.MINUS },
+        '!' => blk: {
+            if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                break :blk Token{
+                    .token_type = TokenType.not_eq,
+                    .literal = self.input[start .. start + 2],
+                };
+            }
+            break :blk Token{ .token_type = TokenType.bang, .literal = Token.BANG };
+        },
+        '/' => Token{ .token_type = TokenType.slash, .literal = Token.SLASH },
+        '*' => Token{ .token_type = TokenType.asterisk, .literal = Token.ASTERISK },
+        '<' => Token{ .token_type = TokenType.lt, .literal = Token.LT },
+        '>' => Token{ .token_type = TokenType.gt, .literal = Token.GT },
+        ';' => Token{ .token_type = TokenType.semicolon, .literal = Token.SEMICOLON },
+        ',' => Token{ .token_type = TokenType.comma, .literal = Token.COMMA },
+        '(' => Token{ .token_type = TokenType.lparen, .literal = Token.LPAREN },
+        ')' => Token{ .token_type = TokenType.rparen, .literal = Token.RPAREN },
+        '{' => Token{ .token_type = TokenType.lbrace, .literal = Token.LBRACE },
+        '}' => Token{ .token_type = TokenType.rbrace, .literal = Token.RBRACE },
+        '"' => Token{ .token_type = TokenType.string, .literal = self.readString() },
+        '[' => Token{ .token_type = TokenType.lbracket, .literal = Token.LBRACKET },
+        ']' => Token{ .token_type = TokenType.rbracket, .literal = Token.RBRACKET },
+        else => blk: {
+            if (isLetter(ch.*)) {
+                const literal = self.readIdentifier();
+                const token_type = Token.getKeywordByLiteral(literal);
+                return Token{ .token_type = token_type, .literal = literal };
+            } else if (std.ascii.isDigit(ch.*)) {
+                return Token{ .token_type = TokenType.int, .literal = self.readNumber() };
+            }
+            break :blk Token{ .token_type = TokenType.illegal, .literal = ch[0..1] };
+        },
+    };
+    self.readChar();
+    return tok;
+}
 
-        const ch = self.ch;
-        const tok: Token = switch (ch.*) {
-            0 => Token{ .token_type = TokenType.eof, .literal = token.EOF },
-            '=' => blk: {
-                if (self.peekChar() == '=') {
-                    self.readChar();
-                    break :blk Token{ .token_type = TokenType.eq, .literal = token.EQ };
-                }
-                break :blk Token{ .token_type = TokenType.assign, .literal = token.ASSIGN };
-            },
-            '+' => Token{ .token_type = TokenType.plus, .literal = token.PLUS },
-            '-' => Token{ .token_type = TokenType.minus, .literal = token.MINUS },
-            '!' => blk: {
-                if (self.peekChar() == '=') {
-                    const start = self.position;
-                    self.readChar();
-                    break :blk Token{
-                        .token_type = TokenType.not_eq,
-                        .literal = self.input[start .. start + 2],
-                    };
-                }
-                break :blk Token{ .token_type = TokenType.bang, .literal = token.BANG };
-            },
-            '/' => Token{ .token_type = TokenType.slash, .literal = token.SLASH },
-            '*' => Token{ .token_type = TokenType.asterisk, .literal = token.ASTERISK },
-            '<' => Token{ .token_type = TokenType.lt, .literal = token.LT },
-            '>' => Token{ .token_type = TokenType.gt, .literal = token.GT },
-            ';' => Token{ .token_type = TokenType.semicolon, .literal = token.SEMICOLON },
-            ',' => Token{ .token_type = TokenType.comma, .literal = token.COMMA },
-            '(' => Token{ .token_type = TokenType.lparen, .literal = token.LPAREN },
-            ')' => Token{ .token_type = TokenType.rparen, .literal = token.RPAREN },
-            '{' => Token{ .token_type = TokenType.lbrace, .literal = token.LBRACE },
-            '}' => Token{ .token_type = TokenType.rbrace, .literal = token.RBRACE },
-            '"' => Token{ .token_type = TokenType.string, .literal = self.readString() },
-            '[' => Token{ .token_type = TokenType.lbracket, .literal = token.LBRACKET },
-            ']' => Token{ .token_type = TokenType.rbracket, .literal = token.RBRACKET },
-            else => blk: {
-                if (isLetter(ch.*)) {
-                    const literal = self.readIdentifier();
-                    const token_type = token.getKeywordByLiteral(literal);
-                    return Token{ .token_type = token_type, .literal = literal };
-                } else if (std.ascii.isDigit(ch.*)) {
-                    return Token{ .token_type = TokenType.int, .literal = self.readNumber() };
-                }
-                break :blk Token{ .token_type = TokenType.illegal, .literal = ch[0..1] };
-            },
-        };
+fn skipWhitespace(self: *Lexer) void {
+    while (std.ascii.isWhitespace(self.ch.*)) {
         self.readChar();
-        return tok;
     }
+}
 
-    fn skipWhitespace(self: *Lexer) void {
-        while (std.ascii.isWhitespace(self.ch.*)) {
-            self.readChar();
-        }
+fn readIdentifier(self: *Lexer) []const u8 {
+    const start = self.position;
+    while (isLetter(self.ch.*)) {
+        self.readChar();
     }
+    return self.input[start..self.position];
+}
 
-    fn readIdentifier(self: *Lexer) []const u8 {
-        const start = self.position;
-        while (isLetter(self.ch.*)) {
-            self.readChar();
-        }
-        return self.input[start..self.position];
-    }
+fn isLetter(ch: u8) bool {
+    return std.ascii.isAlphabetic(ch) or ch == '_';
+}
 
-    fn isLetter(ch: u8) bool {
-        return std.ascii.isAlphabetic(ch) or ch == '_';
+fn readNumber(self: *Lexer) []const u8 {
+    const start = self.position;
+    while (std.ascii.isDigit(self.ch.*)) {
+        self.readChar();
     }
+    return self.input[start..self.position];
+}
 
-    fn readNumber(self: *Lexer) []const u8 {
-        const start = self.position;
-        while (std.ascii.isDigit(self.ch.*)) {
-            self.readChar();
-        }
-        return self.input[start..self.position];
-    }
+fn peekChar(self: *const Lexer) u8 {
+    return if (self.read_position >= self.input.len)
+        0
+    else
+        self.input[self.read_position];
+}
 
-    fn peekChar(self: *const Lexer) u8 {
-        return if (self.read_position >= self.input.len)
-            0
-        else
-            self.input[self.read_position];
+fn readString(self: *Lexer) []const u8 {
+    const start = self.position + 1;
+    while (true) {
+        self.readChar();
+        if (self.ch.* == '"' or self.ch.* == 0) break;
     }
-
-    fn readString(self: *Lexer) []const u8 {
-        const start = self.position + 1;
-        while (true) {
-            self.readChar();
-            if (self.ch.* == '"' or self.ch.* == 0) break;
-        }
-        return self.input[start..self.position];
-    }
-};
+    return self.input[start..self.position];
+}
 
 test "Test Next Token" {
     const input =
@@ -249,4 +247,8 @@ test "Test Next Token" {
         try testing.expectEqual(expected.expected_type, tok.token_type);
         try testing.expectEqualStrings(expected.expected_literal, tok.literal);
     }
+}
+
+test {
+    std.testing.refAllDecls(Lexer);
 }

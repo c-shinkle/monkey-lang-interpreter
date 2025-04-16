@@ -1,14 +1,11 @@
 const std = @import("std");
-
 const AnyWriter = std.io.AnyWriter;
 
 const ast = @import("ast.zig");
+const Environment = @import("Environment.zig");
 const evaluator = @import("evaluator.zig");
-const Lexer = @import("lexer.zig").Lexer;
-const object = @import("object.zig");
-const Parser = @import("parser.zig").Parser;
-const token = @import("token.zig");
-const Environment = @import("environment.zig").Environment;
+const Lexer = @import("Lexer.zig");
+const Parser = @import("Parser.zig");
 
 const c_imports = @cImport(@cInclude("editline/readline.h"));
 

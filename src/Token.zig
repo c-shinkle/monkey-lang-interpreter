@@ -1,24 +1,24 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub const Token = struct {
-    token_type: TokenType,
-    literal: []const u8,
+const Token = @This();
 
-    pub fn dupe(self: Token, alloc: Allocator) Allocator.Error!Token {
-        const literal = if (self.token_type.isLiteralAllocated())
-            try alloc.dupe(u8, self.literal)
-        else
-            self.literal;
-        return Token{ .token_type = self.token_type, .literal = literal };
-    }
+token_type: TokenType,
+literal: []const u8,
 
-    pub fn dupe_deinit(self: Token, alloc: Allocator) void {
-        if (self.token_type.isLiteralAllocated()) {
-            alloc.free(self.literal);
-        }
+pub fn dupe(self: Token, alloc: Allocator) Allocator.Error!Token {
+    const literal = if (self.token_type.isLiteralAllocated())
+        try alloc.dupe(u8, self.literal)
+    else
+        self.literal;
+    return Token{ .token_type = self.token_type, .literal = literal };
+}
+
+pub fn dupe_deinit(self: Token, alloc: Allocator) void {
+    if (self.token_type.isLiteralAllocated()) {
+        alloc.free(self.literal);
     }
-};
+}
 
 pub const TokenType = enum {
     assign,
@@ -199,5 +199,5 @@ pub const EOF = "";
 // pub const DOUBLEQUOTES = "\"";
 
 test {
-    std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(Token);
 }

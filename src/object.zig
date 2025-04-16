@@ -4,8 +4,8 @@ const Allocator = std.mem.Allocator;
 const AnyWriter = std.io.AnyWriter;
 
 const ast = @import("ast.zig");
-const Environment = @import("environment.zig").Environment;
 const builtins = @import("_builtin.zig");
+const Environment = @import("Environment.zig");
 
 const ObjectType = []const u8;
 
@@ -295,4 +295,8 @@ test "Object type" {
         const actual = object_test.object._type();
         try testing.expectEqualStrings(object_test.expected, actual);
     }
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }
