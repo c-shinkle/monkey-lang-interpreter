@@ -9,7 +9,7 @@ const Environment = @import("environment.zig").Environment;
 const Lexer = @import("lexer.zig").Lexer;
 const obj = @import("object.zig");
 const Parser = @import("parser.zig").Parser;
-const token = @import("token.zig");
+const _token = @import("token.zig");
 
 const EvalError = _builtin.BuiltinError || Allocator.Error || std.fmt.AllocPrintError;
 
@@ -135,7 +135,7 @@ fn evalPrefixExpression(
         .bang => evalBangOperatorExpression(right),
         .minus => try evalMinusPrefixOperatorExperssion(alloc, right),
         else => blk: {
-            const args = .{ token.getLiteralByOperator(prefix.operator), right._type() };
+            const args = .{ _token.getLiteralByOperator(prefix.operator), right._type() };
             break :blk try newError(alloc, "unknown operator: {s}{s}", args);
         },
     };
@@ -180,17 +180,17 @@ fn evalInfixOperatorExpression(
     } else if (left_obj == .string and right_obj == .string) {
         return try evalStringInfixExpression(alloc, op, left_obj.string, right_obj.string);
     } else if (!left_obj.eql(right_obj)) {
-        const args = .{ left_obj._type(), token.getLiteralByOperator(op), right_obj._type() };
+        const args = .{ left_obj._type(), _token.getLiteralByOperator(op), right_obj._type() };
         return try newError(alloc, "type mismatch: {s} {s} {s}", args);
     }
 
-    const args = .{ left_obj._type(), token.getLiteralByOperator(op), right_obj._type() };
+    const args = .{ left_obj._type(), _token.getLiteralByOperator(op), right_obj._type() };
     return try newError(alloc, "unknown operator: {s} {s} {s}", args);
 }
 
 fn evalIntegerInfixExpression(
     alloc: Allocator,
-    operator: token.Operator,
+    operator: _token.Operator,
     left: obj.Integer,
     right: obj.Integer,
 ) EvalError!obj.Object {
@@ -215,7 +215,7 @@ fn evalIntegerInfixExpression(
 
 fn evalBooleanInfixExpression(
     alloc: Allocator,
-    operator: token.Operator,
+    operator: _token.Operator,
     left: obj.Boolean,
     right: obj.Boolean,
 ) EvalError!obj.Object {
@@ -223,7 +223,7 @@ fn evalBooleanInfixExpression(
         .eq => if (left.value == right.value) obj.TRUE else obj.FALSE,
         .not_eq => if (left.value != right.value) obj.TRUE else obj.FALSE,
         else => blk: {
-            const args = .{ obj.BOOLEAN_OBJ, token.getLiteralByOperator(operator), obj.BOOLEAN_OBJ };
+            const args = .{ obj.BOOLEAN_OBJ, _token.getLiteralByOperator(operator), obj.BOOLEAN_OBJ };
             break :blk try newError(alloc, "unknown operator: {s} {s} {s}", args);
         },
     };
@@ -231,13 +231,13 @@ fn evalBooleanInfixExpression(
 
 fn evalStringInfixExpression(
     alloc: Allocator,
-    operator: token.Operator,
+    operator: _token.Operator,
     left: obj.String,
     right: obj.String,
 ) EvalError!obj.Object {
     if (operator != .plus) {
         const fmt = "unknown operator: {s} {s} {s}";
-        const args = .{ obj.STRING_OBJ, token.getLiteralByOperator(operator), obj.STRING_OBJ };
+        const args = .{ obj.STRING_OBJ, _token.getLiteralByOperator(operator), obj.STRING_OBJ };
         return try newError(alloc, fmt, args);
     }
 
@@ -437,7 +437,7 @@ fn applyFunction(
 fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalError!obj.Object {
     const duped_value = try string_literal.dupe(alloc);
     std.debug.assert(duped_value == .string_literal);
-    return obj.Object{ .string = obj.String{ .value = duped_value.string_literal._token.literal } };
+    return obj.Object{ .string = obj.String{ .value = duped_value.string_literal.token.literal } };
 }
 
 // Test Suite

@@ -108,12 +108,12 @@ pub const Statement = union(enum) {
 };
 
 pub const LetStatement = struct {
-    _token: token.Token,
+    token: token.Token,
     name: Identifier,
     value: Expression,
 
     pub fn tokenLiteral(self: *const LetStatement) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn statementNode(_: *const LetStatement) void {}
@@ -135,7 +135,7 @@ pub const LetStatement = struct {
     }
 
     pub fn dupe(self: *const LetStatement, alloc: Allocator) !Statement {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_name = try self.name.dupe(alloc);
         errdefer duped_name.dupe_deinit(alloc);
@@ -144,7 +144,7 @@ pub const LetStatement = struct {
         // errdefer duped_value.dupe_deinit(alloc);
         return Statement{
             .let_statement = LetStatement{
-                ._token = duped_token,
+                .token = duped_token,
                 .name = duped_name.identifier,
                 .value = duped_value,
             },
@@ -152,7 +152,7 @@ pub const LetStatement = struct {
     }
 
     pub fn dupe_deinit(self: *const LetStatement, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.name.dupe_deinit(alloc);
 
@@ -161,13 +161,13 @@ pub const LetStatement = struct {
 };
 
 pub const ReturnStatement = struct {
-    _token: token.Token,
+    token: token.Token,
     return_value: Expression,
 
     pub fn statementNode(_: *const ReturnStatement) void {}
 
     pub fn tokenLiteral(self: *const ReturnStatement) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const ReturnStatement, writer: AnyWriter) AnyWriter.Error!void {
@@ -183,33 +183,33 @@ pub const ReturnStatement = struct {
     }
 
     pub fn dupe(self: *const ReturnStatement, alloc: Allocator) !Statement {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_return_value = try self.return_value.dupe(alloc);
         // errdefer duped_return_value.dupe_deinit(alloc);
         return Statement{
             .return_statement = ReturnStatement{
-                ._token = duped_token,
+                .token = duped_token,
                 .return_value = duped_return_value,
             },
         };
     }
 
     pub fn dupe_deinit(self: *const ReturnStatement, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.return_value.dupe_deinit(alloc);
     }
 };
 
 pub const ExpressionStatement = struct {
-    _token: token.Token,
+    token: token.Token,
     expression: Expression,
 
     pub fn statementNode(_: *const ExpressionStatement) void {}
 
     pub fn tokenLiteral(self: *const ExpressionStatement) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const ExpressionStatement, writer: AnyWriter) AnyWriter.Error!void {
@@ -221,31 +221,31 @@ pub const ExpressionStatement = struct {
     }
 
     pub fn dupe(self: *const ExpressionStatement, alloc: Allocator) !Statement {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         const duped_expression = try self.expression.dupe(alloc);
         // errdefer duped_expression.dupe_deinit(alloc);
         return Statement{
             .expression_statement = ExpressionStatement{
-                ._token = duped_token,
+                .token = duped_token,
                 .expression = duped_expression,
             },
         };
     }
 
     pub fn dupe_deinit(self: *const ExpressionStatement, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.expression.dupe_deinit(alloc);
     }
 };
 
 pub const BlockStatement = struct {
-    _token: token.Token,
+    token: token.Token,
     statements: []const Statement,
 
     pub fn tokenLiteral(self: *const BlockStatement) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn statementNode(_: *const BlockStatement) void {}
@@ -264,7 +264,7 @@ pub const BlockStatement = struct {
     }
 
     pub fn dupe(self: *const BlockStatement, alloc: Allocator) !Statement {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         var duped_array_list = std.ArrayListUnmanaged(Statement).empty;
         errdefer {
@@ -280,14 +280,14 @@ pub const BlockStatement = struct {
 
         return Statement{
             .block_statement = BlockStatement{
-                ._token = duped_token,
+                .token = duped_token,
                 .statements = try duped_array_list.toOwnedSlice(alloc),
             },
         };
     }
 
     pub fn dupe_deinit(self: *const BlockStatement, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         for (self.statements) |stmt| {
             stmt.dupe_deinit(alloc);
@@ -347,13 +347,13 @@ pub const Expression = union(enum) {
 };
 
 pub const Identifier = struct {
-    _token: token.Token,
+    token: token.Token,
     value: []const u8,
 
     pub fn expressionNode(_: *const Identifier) void {}
 
     pub fn tokenLiteral(self: *const Identifier) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const Identifier, writer: AnyWriter) AnyWriter.Error!void {
@@ -363,60 +363,60 @@ pub const Identifier = struct {
     pub fn parser_deinit(_: *const Identifier, _: std.mem.Allocator) void {}
 
     pub fn dupe(self: *const Identifier, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         return Expression{
             .identifier = Identifier{
-                ._token = duped_token,
+                .token = duped_token,
                 .value = duped_token.literal,
             },
         };
     }
 
     pub fn dupe_deinit(self: *const Identifier, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
     }
 };
 
 pub const IntegerLiteral = struct {
-    _token: token.Token,
+    token: token.Token,
     value: i64,
 
     pub fn expressionNode(_: *const IntegerLiteral) void {}
 
     pub fn tokenLiteral(self: *const IntegerLiteral) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const IntegerLiteral, writer: AnyWriter) AnyWriter.Error!void {
-        try writer.writeAll(self._token.literal);
+        try writer.writeAll(self.token.literal);
     }
 
     pub fn parser_deinit(_: *const IntegerLiteral, _: std.mem.Allocator) void {}
 
     pub fn dupe(self: *const IntegerLiteral, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         return Expression{
             .integer_literal = IntegerLiteral{
-                ._token = duped_token,
+                .token = duped_token,
                 .value = self.value,
             },
         };
     }
 
     pub fn dupe_deinit(self: *const IntegerLiteral, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
     }
 };
 
 pub const PrefixExpression = struct {
-    _token: token.Token,
+    token: token.Token,
     operator: token.ScopedTokenType(.operator),
     right: *Expression,
 
     pub fn expressionNode(_: *const PrefixExpression) void {}
 
     pub fn tokenLiteral(self: *const PrefixExpression) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const PrefixExpression, writer: AnyWriter) AnyWriter.Error!void {
@@ -432,7 +432,7 @@ pub const PrefixExpression = struct {
     }
 
     pub fn dupe(self: *const PrefixExpression, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
         const duped_right = try self.right.dupe(alloc);
@@ -443,7 +443,7 @@ pub const PrefixExpression = struct {
 
         return Expression{
             .prefix_expression = PrefixExpression{
-                ._token = duped_token,
+                .token = duped_token,
                 .operator = self.operator,
                 .right = duped_right_ptr,
             },
@@ -451,14 +451,14 @@ pub const PrefixExpression = struct {
     }
 
     pub fn dupe_deinit(self: *const PrefixExpression, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
         self.right.dupe_deinit(alloc);
         alloc.destroy(self.right);
     }
 };
 
 pub const InfixExpression = struct {
-    _token: token.Token,
+    token: token.Token,
     left: *Expression,
     operator: token.ScopedTokenType(.operator),
     right: *Expression,
@@ -466,7 +466,7 @@ pub const InfixExpression = struct {
     pub fn expressionNode(_: *const InfixExpression) void {}
 
     pub fn tokenLiteral(self: *const InfixExpression) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const InfixExpression, writer: AnyWriter) AnyWriter.Error!void {
@@ -488,7 +488,7 @@ pub const InfixExpression = struct {
     }
 
     pub fn dupe(self: *const InfixExpression, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
         const duped_left = try self.left.dupe(alloc);
@@ -505,7 +505,7 @@ pub const InfixExpression = struct {
 
         return Expression{
             .infix_expression = InfixExpression{
-                ._token = duped_token,
+                .token = duped_token,
                 .left = duped_left_ptr,
                 .operator = self.operator,
                 .right = duped_right_ptr,
@@ -514,7 +514,7 @@ pub const InfixExpression = struct {
     }
 
     pub fn dupe_deinit(self: *const InfixExpression, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.left.dupe_deinit(alloc);
         alloc.destroy(self.left);
@@ -525,30 +525,30 @@ pub const InfixExpression = struct {
 };
 
 pub const Boolean = struct {
-    _token: token.Token,
+    token: token.Token,
     value: bool,
 
     pub fn expressionNode(_: *const Boolean) void {}
 
     pub fn tokenLiteral(self: *const Boolean) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const Boolean, writer: AnyWriter) AnyWriter.Error!void {
-        try writer.writeAll(self._token.literal);
+        try writer.writeAll(self.token.literal);
     }
 
     pub fn parser_deinit(_: *const Boolean, _: std.mem.Allocator) void {}
 
     pub fn dupe_deinit(self: *const Boolean, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
     }
 
     pub fn dupe(self: *const Boolean, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         return Expression{
             .boolean_expression = Boolean{
-                ._token = duped_token,
+                .token = duped_token,
                 .value = self.value,
             },
         };
@@ -556,7 +556,7 @@ pub const Boolean = struct {
 };
 
 pub const IfExpression = struct {
-    _token: token.Token,
+    token: token.Token,
     condition: *Expression,
     consequence: *BlockStatement,
     alternative: ?*BlockStatement,
@@ -564,7 +564,7 @@ pub const IfExpression = struct {
     pub fn expressionNode(_: *const IfExpression) void {}
 
     pub fn tokenLiteral(self: *const IfExpression) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const IfExpression, writer: AnyWriter) AnyWriter.Error!void {
@@ -592,7 +592,7 @@ pub const IfExpression = struct {
     }
 
     pub fn dupe(self: *const IfExpression, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
         const duped_condition = try self.condition.dupe(alloc);
@@ -620,7 +620,7 @@ pub const IfExpression = struct {
 
         return Expression{
             .if_expression = IfExpression{
-                ._token = duped_token,
+                .token = duped_token,
                 .condition = duped_condition_ptr,
                 .consequence = duped_consequence_ptr,
                 .alternative = duped_alternative_ptr,
@@ -629,7 +629,7 @@ pub const IfExpression = struct {
     }
 
     pub fn dupe_deinit(self: *const IfExpression, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.consequence.dupe_deinit(alloc);
         alloc.destroy(self.consequence);
@@ -645,14 +645,14 @@ pub const IfExpression = struct {
 };
 
 pub const FunctionLiteral = struct {
-    _token: token.Token,
+    token: token.Token,
     parameters: []const Identifier,
     body: BlockStatement,
 
     pub fn expressionNode(_: *const FunctionLiteral) void {}
 
     pub fn tokenLiteral(self: *const FunctionLiteral) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const FunctionLiteral, writer: AnyWriter) AnyWriter.Error!void {
@@ -678,7 +678,7 @@ pub const FunctionLiteral = struct {
     }
 
     pub fn dupe(self: *const FunctionLiteral, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         var duped_array_list = std.ArrayListUnmanaged(Identifier).empty;
         errdefer {
@@ -703,7 +703,7 @@ pub const FunctionLiteral = struct {
 
         return Expression{
             .function_literal = FunctionLiteral{
-                ._token = duped_token,
+                .token = duped_token,
                 .parameters = duped_parameters,
                 .body = duped_body.block_statement,
             },
@@ -711,7 +711,7 @@ pub const FunctionLiteral = struct {
     }
 
     pub fn dupe_deinit(self: *const FunctionLiteral, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         for (self.parameters) |param| {
             param.dupe_deinit(alloc);
@@ -723,14 +723,14 @@ pub const FunctionLiteral = struct {
 };
 
 pub const CallExpression = struct {
-    _token: token.Token,
+    token: token.Token,
     function: *const Expression,
     arguments: []const Expression,
 
     pub fn expressionNode(_: *const CallExpression) void {}
 
     pub fn tokenLiteral(self: *const CallExpression) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(
@@ -760,7 +760,7 @@ pub const CallExpression = struct {
     }
 
     pub fn dupe(self: *const CallExpression, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
         const duped_function = try self.function.dupe(alloc);
@@ -783,7 +783,7 @@ pub const CallExpression = struct {
 
         return Expression{
             .call_expression = CallExpression{
-                ._token = duped_token,
+                .token = duped_token,
                 .function = duped_function_ptr,
                 .arguments = try duped_arguments.toOwnedSlice(alloc),
             },
@@ -791,7 +791,7 @@ pub const CallExpression = struct {
     }
 
     pub fn dupe_deinit(self: *const CallExpression, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.function.dupe_deinit(alloc);
         alloc.destroy(self.function);
@@ -804,38 +804,38 @@ pub const CallExpression = struct {
 };
 
 pub const StringLiteral = struct {
-    _token: token.Token,
+    token: token.Token,
 
     pub fn expressionNode(_: *const StringLiteral) void {}
 
     pub fn tokenLiteral(self: *const StringLiteral) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const StringLiteral, writer: AnyWriter) AnyWriter.Error!void {
-        try writer.writeAll(self._token.literal);
+        try writer.writeAll(self.token.literal);
     }
 
     pub fn parser_deinit(_: *const StringLiteral, _: std.mem.Allocator) void {}
 
     pub fn dupe(self: *const StringLiteral, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
-        return Expression{ .string_literal = StringLiteral{ ._token = duped_token } };
+        const duped_token = try self.token.dupe(alloc);
+        return Expression{ .string_literal = StringLiteral{ .token = duped_token } };
     }
 
     pub fn dupe_deinit(self: *const StringLiteral, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
     }
 };
 
 pub const ArrayLiteral = struct {
-    _token: token.Token,
+    token: token.Token,
     elements: []const Expression,
 
     pub fn expresssionNode(_: *const ArrayLiteral) void {}
 
     pub fn tokenLiteral(self: *const ArrayLiteral) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const ArrayLiteral, writer: AnyWriter) AnyWriter.Error!void {
@@ -853,7 +853,7 @@ pub const ArrayLiteral = struct {
     }
 
     pub fn dupe(self: *const ArrayLiteral, alloc: Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
 
         var duped_elements = try alloc.alloc(Expression, self.elements.len);
         for (self.elements, 0..) |element, i| {
@@ -862,14 +862,14 @@ pub const ArrayLiteral = struct {
 
         return Expression{
             .array_literal = ArrayLiteral{
-                ._token = duped_token,
+                .token = duped_token,
                 .elements = duped_elements,
             },
         };
     }
 
     pub fn dupe_deinit(self: *const ArrayLiteral, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         for (self.elements) |element| {
             element.dupe_deinit(alloc);
@@ -878,14 +878,14 @@ pub const ArrayLiteral = struct {
 };
 
 pub const IndexExpression = struct {
-    _token: token.Token,
+    token: token.Token,
     left: *Expression,
     index: *Expression,
 
     pub fn expresionNode(_: *const IndexExpression) void {}
 
     pub fn tokenLiteral(self: *const IndexExpression) []const u8 {
-        return self._token.literal;
+        return self.token.literal;
     }
 
     pub fn string(self: *const IndexExpression, writer: AnyWriter) AnyWriter.Error!void {
@@ -905,7 +905,7 @@ pub const IndexExpression = struct {
     }
 
     pub fn dupe(self: *const IndexExpression, alloc: std.mem.Allocator) !Expression {
-        const duped_token = try self._token.dupe(alloc);
+        const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
 
         const duped_left = try self.left.dupe(alloc);
@@ -922,7 +922,7 @@ pub const IndexExpression = struct {
 
         return Expression{
             .index_expression = IndexExpression{
-                ._token = duped_token,
+                .token = duped_token,
                 .left = duped_left_ptr,
                 .index = duped_right_ptr,
             },
@@ -930,7 +930,7 @@ pub const IndexExpression = struct {
     }
 
     pub fn dupe_deinit(self: *const IndexExpression, alloc: Allocator) void {
-        self._token.dupe_deinit(alloc);
+        self.token.dupe_deinit(alloc);
 
         self.left.dupe_deinit(alloc);
         alloc.destroy(self.left);
@@ -945,7 +945,7 @@ pub const IndexExpression = struct {
 test "Expression Out of Memory" {
     var prefix_right = Expression{
         .boolean_expression = Boolean{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = ._false,
                 .literal = "false",
             },
@@ -954,7 +954,7 @@ test "Expression Out of Memory" {
     };
     var infix_left = Expression{
         .integer_literal = IntegerLiteral{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = .int,
                 .literal = "0",
             },
@@ -963,7 +963,7 @@ test "Expression Out of Memory" {
     };
     var infix_right = Expression{
         .integer_literal = IntegerLiteral{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = .int,
                 .literal = "1",
             },
@@ -973,7 +973,7 @@ test "Expression Out of Memory" {
     var function_parameters = try testing.allocator.alloc(Identifier, 1);
     defer testing.allocator.free(function_parameters);
     function_parameters[0] = Identifier{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .identifier,
             .literal = "a",
         },
@@ -982,13 +982,13 @@ test "Expression Out of Memory" {
     var function_statements = [_]Statement{
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
                 .expression = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -999,7 +999,7 @@ test "Expression Out of Memory" {
         },
     };
     const function_body = BlockStatement{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .int,
             .literal = "0",
         },
@@ -1007,7 +1007,7 @@ test "Expression Out of Memory" {
     };
     var if_condition = Expression{
         .boolean_expression = Boolean{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = ._false,
                 .literal = "false",
             },
@@ -1015,14 +1015,14 @@ test "Expression Out of Memory" {
         },
     };
     var consequence = BlockStatement{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .lbrace,
             .literal = "{",
         },
         .statements = &function_statements,
     };
     var alternative = BlockStatement{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .lbrace,
             .literal = "{",
         },
@@ -1030,7 +1030,7 @@ test "Expression Out of Memory" {
     };
     const call_function = Expression{
         .identifier = Identifier{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = .identifier,
                 .literal = "c",
             },
@@ -1040,7 +1040,7 @@ test "Expression Out of Memory" {
     var call_arguments = [_]Expression{
         Expression{
             .integer_literal = IntegerLiteral{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
@@ -1052,7 +1052,7 @@ test "Expression Out of Memory" {
     const expressions = [_]Expression{
         Expression{
             .identifier = Identifier{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .identifier,
                     .literal = "a",
                 },
@@ -1061,7 +1061,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .integer_literal = IntegerLiteral{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
@@ -1070,7 +1070,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .boolean_expression = Boolean{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._false,
                     .literal = "false",
                 },
@@ -1079,7 +1079,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .prefix_expression = PrefixExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .bang,
                     .literal = "!false",
                 },
@@ -1089,7 +1089,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .infix_expression = InfixExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .plus,
                     .literal = "+",
                 },
@@ -1100,7 +1100,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .if_expression = IfExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._if,
                     .literal = "if",
                 },
@@ -1111,7 +1111,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .function_literal = FunctionLiteral{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._function,
                     .literal = "fn",
                 },
@@ -1121,7 +1121,7 @@ test "Expression Out of Memory" {
         },
         Expression{
             .call_expression = CallExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .identifier,
                     .literal = "c",
                 },
@@ -1143,7 +1143,7 @@ test "Expression Out of Memory" {
 test "Expression deinit" {
     var prefix_right = Expression{
         .boolean_expression = Boolean{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = ._false,
                 .literal = "false",
             },
@@ -1152,7 +1152,7 @@ test "Expression deinit" {
     };
     var infix_left = Expression{
         .integer_literal = IntegerLiteral{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = .int,
                 .literal = "0",
             },
@@ -1161,7 +1161,7 @@ test "Expression deinit" {
     };
     var infix_right = Expression{
         .integer_literal = IntegerLiteral{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = .int,
                 .literal = "1",
             },
@@ -1171,7 +1171,7 @@ test "Expression deinit" {
     var function_parameters = try testing.allocator.alloc(Identifier, 1);
     defer testing.allocator.free(function_parameters);
     function_parameters[0] = Identifier{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .identifier,
             .literal = "a",
         },
@@ -1180,13 +1180,13 @@ test "Expression deinit" {
     var function_statements = [_]Statement{
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
                 .expression = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1197,7 +1197,7 @@ test "Expression deinit" {
         },
     };
     const function_body = BlockStatement{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .int,
             .literal = "0",
         },
@@ -1205,7 +1205,7 @@ test "Expression deinit" {
     };
     var if_condition = Expression{
         .boolean_expression = Boolean{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = ._false,
                 .literal = "false",
             },
@@ -1213,14 +1213,14 @@ test "Expression deinit" {
         },
     };
     var consequence = BlockStatement{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .lbrace,
             .literal = "{",
         },
         .statements = &function_statements,
     };
     var alternative = BlockStatement{
-        ._token = token.Token{
+        .token = token.Token{
             .token_type = .lbrace,
             .literal = "{",
         },
@@ -1228,7 +1228,7 @@ test "Expression deinit" {
     };
     const call_function = Expression{
         .identifier = Identifier{
-            ._token = token.Token{
+            .token = token.Token{
                 .token_type = .identifier,
                 .literal = "c",
             },
@@ -1238,7 +1238,7 @@ test "Expression deinit" {
     var call_arguments = [_]Expression{
         Expression{
             .integer_literal = IntegerLiteral{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
@@ -1250,7 +1250,7 @@ test "Expression deinit" {
     const expressions = [_]Expression{
         Expression{
             .identifier = Identifier{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .identifier,
                     .literal = "a",
                 },
@@ -1259,7 +1259,7 @@ test "Expression deinit" {
         },
         Expression{
             .integer_literal = IntegerLiteral{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
@@ -1268,7 +1268,7 @@ test "Expression deinit" {
         },
         Expression{
             .boolean_expression = Boolean{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._false,
                     .literal = "false",
                 },
@@ -1277,7 +1277,7 @@ test "Expression deinit" {
         },
         Expression{
             .prefix_expression = PrefixExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .bang,
                     .literal = "!false",
                 },
@@ -1287,7 +1287,7 @@ test "Expression deinit" {
         },
         Expression{
             .infix_expression = InfixExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .plus,
                     .literal = "+",
                 },
@@ -1298,7 +1298,7 @@ test "Expression deinit" {
         },
         Expression{
             .if_expression = IfExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._if,
                     .literal = "if",
                 },
@@ -1309,7 +1309,7 @@ test "Expression deinit" {
         },
         Expression{
             .function_literal = FunctionLiteral{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._function,
                     .literal = "fn",
                 },
@@ -1319,7 +1319,7 @@ test "Expression deinit" {
         },
         Expression{
             .call_expression = CallExpression{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .identifier,
                     .literal = "c",
                 },
@@ -1341,13 +1341,13 @@ test "Statement Out of Memory" {
     const block_statements = [_]Statement{
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
                 .expression = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1361,12 +1361,12 @@ test "Statement Out of Memory" {
     const statements = [_]Statement{
         Statement{
             .let_statement = LetStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .let,
                     .literal = "let",
                 },
                 .name = Identifier{
-                    ._token = token.Token{
+                    .token = token.Token{
                         .token_type = .identifier,
                         .literal = "a",
                     },
@@ -1374,7 +1374,7 @@ test "Statement Out of Memory" {
                 },
                 .value = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1385,13 +1385,13 @@ test "Statement Out of Memory" {
         },
         Statement{
             .return_statement = ReturnStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._return,
                     .literal = "return",
                 },
                 .return_value = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1402,13 +1402,13 @@ test "Statement Out of Memory" {
         },
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._true,
                     .literal = "true",
                 },
                 .expression = Expression{
                     .boolean_expression = Boolean{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = ._true,
                             .literal = "true",
                         },
@@ -1419,7 +1419,7 @@ test "Statement Out of Memory" {
         },
         Statement{
             .block_statement = BlockStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .lbrace,
                     .literal = "{",
                 },
@@ -1441,13 +1441,13 @@ test "Statement deinit" {
     const block_statements = [_]Statement{
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
                 .expression = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1461,12 +1461,12 @@ test "Statement deinit" {
     const statements = [_]Statement{
         Statement{
             .let_statement = LetStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .let,
                     .literal = "let",
                 },
                 .name = Identifier{
-                    ._token = token.Token{
+                    .token = token.Token{
                         .token_type = .identifier,
                         .literal = "a",
                     },
@@ -1474,7 +1474,7 @@ test "Statement deinit" {
                 },
                 .value = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1485,13 +1485,13 @@ test "Statement deinit" {
         },
         Statement{
             .return_statement = ReturnStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._return,
                     .literal = "return",
                 },
                 .return_value = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1502,13 +1502,13 @@ test "Statement deinit" {
         },
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._true,
                     .literal = "true",
                 },
                 .expression = Expression{
                     .boolean_expression = Boolean{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = ._true,
                             .literal = "true",
                         },
@@ -1519,7 +1519,7 @@ test "Statement deinit" {
         },
         Statement{
             .block_statement = BlockStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .lbrace,
                     .literal = "{",
                 },
@@ -1540,13 +1540,13 @@ test "Program dupe deinit" {
     var block_statements = [_]Statement{
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .int,
                     .literal = "0",
                 },
                 .expression = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1559,12 +1559,12 @@ test "Program dupe deinit" {
     const statements = .{
         Statement{
             .let_statement = LetStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .let,
                     .literal = "let",
                 },
                 .name = Identifier{
-                    ._token = token.Token{
+                    .token = token.Token{
                         .token_type = .identifier,
                         .literal = "a",
                     },
@@ -1572,7 +1572,7 @@ test "Program dupe deinit" {
                 },
                 .value = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1583,13 +1583,13 @@ test "Program dupe deinit" {
         },
         Statement{
             .return_statement = ReturnStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._return,
                     .literal = "return",
                 },
                 .return_value = Expression{
                     .integer_literal = IntegerLiteral{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = .int,
                             .literal = "0",
                         },
@@ -1600,13 +1600,13 @@ test "Program dupe deinit" {
         },
         Statement{
             .expression_statement = ExpressionStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = ._true,
                     .literal = "true",
                 },
                 .expression = Expression{
                     .boolean_expression = Boolean{
-                        ._token = token.Token{
+                        .token = token.Token{
                             .token_type = ._true,
                             .literal = "true",
                         },
@@ -1617,7 +1617,7 @@ test "Program dupe deinit" {
         },
         Statement{
             .block_statement = BlockStatement{
-                ._token = token.Token{
+                .token = token.Token{
                     .token_type = .lbrace,
                     .literal = "{",
                 },

@@ -6,8 +6,9 @@ const ast = @import("ast.zig");
 const Expression = ast.Expression;
 const ExpressionStatement = ast.ExpressionStatement;
 const Lexer = @import("lexer.zig").Lexer;
-const token = @import("token.zig");
-const Operator = token.Operator;
+const _token = @import("token.zig");
+const TokenType = _token.TokenType;
+const Operator = _token.Operator;
 
 const ParserError = error{
     MissingLetAssign,
@@ -39,7 +40,7 @@ const Precedence = enum {
     index,
 };
 
-fn getPrecedence(_type: token.TokenType) Precedence {
+fn getPrecedence(_type: TokenType) Precedence {
     return switch (_type) {
         .eq, .not_eq => Precedence.equals,
         .lt, .gt => Precedence.lessgreater,
@@ -53,8 +54,8 @@ fn getPrecedence(_type: token.TokenType) Precedence {
 
 pub const Parser = struct {
     lexer: *Lexer,
-    cur_token: token.Token,
-    peek_token: token.Token,
+    cur_token: _token.Token,
+    peek_token: _token.Token,
     errors: std.ArrayListUnmanaged([]const u8),
 
     // Initialization
@@ -155,7 +156,7 @@ pub const Parser = struct {
         }
 
         const name = ast.Identifier{
-            ._token = self.cur_token,
+            .token = self.cur_token,
             .value = self.cur_token.literal,
         };
 
@@ -172,11 +173,11 @@ pub const Parser = struct {
             self.nextToken();
         }
 
-        return ast.LetStatement{ ._token = let_token, .name = name, .value = value };
+        return ast.LetStatement{ .token = let_token, .name = name, .value = value };
     }
 
     pub fn parseReturnStatement(self: *Parser, alloc: Allocator) ParserError!ast.ReturnStatement {
-        const _token = self.cur_token;
+        const token = self.cur_token;
 
         self.nextToken();
 
@@ -186,7 +187,7 @@ pub const Parser = struct {
             self.nextToken();
         }
 
-        return ast.ReturnStatement{ ._token = _token, .return_value = return_value };
+        return ast.ReturnStatement{ .token = token, .return_value = return_value };
     }
 
     pub fn parseExpressionStatement(
@@ -200,11 +201,11 @@ pub const Parser = struct {
             self.nextToken();
         }
 
-        return ExpressionStatement{ ._token = cur_token, .expression = expression };
+        return ExpressionStatement{ .token = cur_token, .expression = expression };
     }
 
     pub fn parseBlockStatement(self: *Parser, alloc: Allocator) ParserError!ast.BlockStatement {
-        const _token = self.cur_token;
+        const token = self.cur_token;
         var statements = std.ArrayListUnmanaged(ast.Statement).empty;
         errdefer {
             for (statements.items) |stmt| {
@@ -223,7 +224,7 @@ pub const Parser = struct {
         }
 
         return ast.BlockStatement{
-            ._token = _token,
+            .token = token,
             .statements = try statements.toOwnedSlice(alloc),
         };
     }
@@ -259,7 +260,7 @@ pub const Parser = struct {
     fn parseIdentifier(self: *const Parser, _: Allocator) ParserError!Expression {
         return Expression{
             .identifier = ast.Identifier{
-                ._token = self.cur_token,
+                .token = self.cur_token,
                 .value = self.cur_token.literal,
             },
         };
@@ -269,13 +270,13 @@ pub const Parser = struct {
         const cur_token = self.cur_token;
         const value = try std.fmt.parseInt(i64, cur_token.literal, 10);
 
-        const integer_literal = ast.IntegerLiteral{ ._token = cur_token, .value = value };
+        const integer_literal = ast.IntegerLiteral{ .token = cur_token, .value = value };
         return Expression{ .integer_literal = integer_literal };
     }
 
     fn parsePrefixExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
-        const _token = self.cur_token;
-        const operator = token.findOperatorByLiteral(self.cur_token.literal) orelse
+        const token = self.cur_token;
+        const operator = _token.findOperatorByLiteral(self.cur_token.literal) orelse
             return ParserError.UnknownOperatorToken;
 
         self.nextToken();
@@ -286,7 +287,7 @@ pub const Parser = struct {
 
         return Expression{
             .prefix_expression = ast.PrefixExpression{
-                ._token = _token,
+                .token = token,
                 .operator = operator,
                 .right = right,
             },
@@ -298,8 +299,8 @@ pub const Parser = struct {
         alloc: Allocator,
         lhs: Expression,
     ) ParserError!Expression {
-        const _token = self.cur_token;
-        const operator = token.findOperatorByLiteral(self.cur_token.literal) orelse
+        const token = self.cur_token;
+        const operator = _token.findOperatorByLiteral(self.cur_token.literal) orelse
             return ParserError.UnknownOperatorToken;
 
         const precedence = self.curPrecedence();
@@ -315,7 +316,7 @@ pub const Parser = struct {
 
         return Expression{
             .infix_expression = ast.InfixExpression{
-                ._token = _token,
+                .token = token,
                 .left = left,
                 .operator = operator,
                 .right = right,
@@ -326,7 +327,7 @@ pub const Parser = struct {
     fn parseBoolean(self: *Parser, _: Allocator) ParserError!Expression {
         return Expression{
             .boolean_expression = ast.Boolean{
-                ._token = self.cur_token,
+                .token = self.cur_token,
                 .value = self.curTokenIs(._true),
             },
         };
@@ -345,7 +346,7 @@ pub const Parser = struct {
     }
 
     fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
-        const _token = self.cur_token;
+        const token = self.cur_token;
         if (!self.expectPeek(.lparen)) {
             return ParserError.MissingLeftParenthesis;
         }
@@ -383,7 +384,7 @@ pub const Parser = struct {
 
         return Expression{
             .if_expression = ast.IfExpression{
-                ._token = _token,
+                .token = token,
                 .condition = condition,
                 .consequence = consequence,
                 .alternative = maybe_alt,
@@ -392,7 +393,7 @@ pub const Parser = struct {
     }
 
     fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!Expression {
-        const _token = self.cur_token;
+        const token = self.cur_token;
         if (!self.expectPeek(.lparen)) {
             return ParserError.MissingLeftParenthesis;
         }
@@ -406,7 +407,7 @@ pub const Parser = struct {
 
         return Expression{
             .function_literal = ast.FunctionLiteral{
-                ._token = _token,
+                .token = token,
                 .parameters = parameters,
                 .body = body,
             },
@@ -425,7 +426,7 @@ pub const Parser = struct {
         self.nextToken();
 
         try identifiers.append(alloc, ast.Identifier{
-            ._token = self.cur_token,
+            .token = self.cur_token,
             .value = self.cur_token.literal,
         });
 
@@ -433,7 +434,7 @@ pub const Parser = struct {
             self.nextToken();
             self.nextToken();
             try identifiers.append(alloc, ast.Identifier{
-                ._token = self.cur_token,
+                .token = self.cur_token,
                 .value = self.cur_token.literal,
             });
         }
@@ -453,12 +454,12 @@ pub const Parser = struct {
         const function = try alloc.create(Expression);
         errdefer alloc.destroy(function);
         function.* = lhs;
-        const _token = self.cur_token;
+        const token = self.cur_token;
 
         const arguments = try self.parseCallArguments(alloc);
         return Expression{
             .call_expression = ast.CallExpression{
-                ._token = _token,
+                .token = token,
                 .function = function,
                 .arguments = arguments,
             },
@@ -501,21 +502,21 @@ pub const Parser = struct {
     }
 
     fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
-        return Expression{ .string_literal = ast.StringLiteral{ ._token = self.cur_token } };
+        return Expression{ .string_literal = ast.StringLiteral{ .token = self.cur_token } };
     }
 
     fn parseArrayLiteral(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
-        const _token = self.cur_token;
+        const token = self.cur_token;
 
-        const elements = try parseExpressionList(self, token.TokenType.rbracket, alloc);
+        const elements = try parseExpressionList(self, TokenType.rbracket, alloc);
 
-        const array_literal = ast.ArrayLiteral{ ._token = _token, .elements = elements };
+        const array_literal = ast.ArrayLiteral{ .token = token, .elements = elements };
         return Expression{ .array_literal = array_literal };
     }
 
     fn parseExpressionList(
         self: *Parser,
-        end: token.TokenType,
+        end: TokenType,
         alloc: Allocator,
     ) ParserError![]const ast.Expression {
         var list: std.ArrayListUnmanaged(ast.Expression) = .empty;
@@ -530,7 +531,7 @@ pub const Parser = struct {
         // errdefer first.parser_deinit(alloc);
         try list.append(alloc, first);
 
-        while (self.peekTokenIs(token.TokenType.comma)) {
+        while (self.peekTokenIs(TokenType.comma)) {
             self.nextToken();
             self.nextToken();
 
@@ -546,15 +547,19 @@ pub const Parser = struct {
         return try list.toOwnedSlice(alloc);
     }
 
-    fn parseIndexExpression(self: *Parser, alloc: Allocator, left: ast.Expression) ParserError!ast.Expression {
-        const _token = self.cur_token;
+    fn parseIndexExpression(
+        self: *Parser,
+        alloc: Allocator,
+        left: ast.Expression,
+    ) ParserError!ast.Expression {
+        const token = self.cur_token;
         self.nextToken();
 
         const index = try alloc.create(ast.Expression);
         errdefer alloc.destroy(index);
         index.* = try self.parseExpression(alloc, Precedence.lowest);
 
-        if (!self.expectPeek(token.TokenType.rbracket)) {
+        if (!self.expectPeek(TokenType.rbracket)) {
             return ParserError.MissingRightBracket;
         }
 
@@ -564,7 +569,7 @@ pub const Parser = struct {
 
         return ast.Expression{
             .index_expression = ast.IndexExpression{
-                ._token = _token,
+                .token = token,
                 .index = index,
                 .left = left_ptr,
             },
@@ -578,16 +583,16 @@ pub const Parser = struct {
         self.peek_token = self.lexer.nextToken();
     }
 
-    fn curTokenIs(self: *const Parser, t: token.TokenType) bool {
+    fn curTokenIs(self: *const Parser, t: TokenType) bool {
         return self.cur_token.token_type == t;
     }
 
-    fn peekTokenIs(self: *const Parser, t: token.TokenType) bool {
+    fn peekTokenIs(self: *const Parser, t: TokenType) bool {
         return self.peek_token.token_type == t;
     }
 
-    fn expectPeek(self: *Parser, _token: token.TokenType) bool {
-        if (self.peekTokenIs(_token)) {
+    fn expectPeek(self: *Parser, token: TokenType) bool {
+        if (self.peekTokenIs(token)) {
             self.nextToken();
             return true;
         } else {
@@ -595,14 +600,14 @@ pub const Parser = struct {
         }
     }
 
-    fn peekErrors(self: *Parser, alloc: Allocator, t: token.TokenType) !void {
+    fn peekErrors(self: *Parser, alloc: Allocator, t: TokenType) !void {
         const fmt = "expected next token to be {any}, got {any} instead";
         const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token.token_type });
         errdefer alloc.free(msg);
         try self.errors.append(alloc, msg);
     }
 
-    fn noPrefixParseFnError(self: *Parser, alloc: Allocator, t: token.TokenType) !void {
+    fn noPrefixParseFnError(self: *Parser, alloc: Allocator, t: TokenType) !void {
         const fmt = "no prefix parse function for {any} found";
         const msg = try std.fmt.allocPrint(alloc, fmt, .{t});
         errdefer alloc.free(msg);
@@ -617,7 +622,7 @@ pub const Parser = struct {
         return getPrecedence(self.cur_token.token_type);
     }
 
-    fn lookupPrefixParseFns(token_type: token.TokenType) ?PrefixParseFn {
+    fn lookupPrefixParseFns(token_type: TokenType) ?PrefixParseFn {
         return switch (token_type) {
             .identifier => parseIdentifier,
             .int => parseIntegerLiteral,
@@ -632,7 +637,7 @@ pub const Parser = struct {
         };
     }
 
-    fn lookupInfixParseFns(token_type: token.TokenType) ?InfixParseFn {
+    fn lookupInfixParseFns(token_type: TokenType) ?InfixParseFn {
         return switch (token_type) {
             .plus, .minus, .slash, .asterisk, .eq, .not_eq, .lt, .gt => parseInfixExpression,
             .lparen => parseCallExpression,
@@ -1351,7 +1356,7 @@ test "String Literal Expression" {
     try testing.expect(stmt.expression == .string_literal);
     const literal = stmt.expression.string_literal;
 
-    try testing.expectEqualStrings("hello world", literal._token.literal);
+    try testing.expectEqualStrings("hello world", literal.token.literal);
 }
 
 test "Array Literal" {
@@ -1392,13 +1397,14 @@ test "Index Expression" {
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
-    const expression = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt.expression,
+    const exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
         else => @panic("stmts[0] is not ExpressionStatement"),
     };
 
-    std.debug.assert(expression == .index_expression);
-    const index_exp = expression.index_expression;
+    try testing.expect(exp_stmt.expression == .index_expression);
+    const index_exp = exp_stmt.expression.index_expression;
+
     try testIdentifier(index_exp.left.*, "myArray");
     try testInfixExpression(index_exp.index.*, 1, Operator.plus, 1);
 }
