@@ -37,8 +37,11 @@ pub fn dupe(self: *const Environment) Allocator.Error!Environment {
 }
 
 pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
-    if (self.store.get(name)) |some| return some;
-    if (self.outer) |outer| return outer.get(name);
+    if (self.store.get(name)) |some| {
+        return some;
+    } else if (self.outer) |outer| {
+        return outer.get(name);
+    }
     return null;
 }
 

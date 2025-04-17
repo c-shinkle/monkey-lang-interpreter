@@ -1,17 +1,16 @@
 const std = @import("std");
-const obj = @import("object.zig");
-const evaluator = @import("evaluator.zig");
-
 const Allocator = std.mem.Allocator;
-
 pub const BuiltinError = std.fmt.AllocPrintError;
+
+const evaluator = @import("evaluator.zig");
+const obj = @import("object.zig");
 
 pub const BuiltinFnPointer = *const fn (
     alloc: Allocator,
     args: []const obj.Object,
 ) BuiltinError!obj.Object;
 
-pub var builtin_map = std.StaticStringMap(obj.Object).initComptime(.{
+pub const builtin_map = std.StaticStringMap(obj.Object).initComptime(.{
     .{
         "len", obj.Object{ .builtin = obj.Builtin{ ._fn = len } },
     },
@@ -28,4 +27,8 @@ fn len(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
             break :blk try evaluator.newError(alloc, fmt, .{args[0]._type()});
         },
     };
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }
