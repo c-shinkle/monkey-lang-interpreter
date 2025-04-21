@@ -13,7 +13,7 @@ pub fn start(stdout: AnyWriter) !void {
     var stdout_buffer = std.io.BufferedWriter(4096, AnyWriter){ .unbuffered_writer = stdout };
     const buffer_writer = stdout_buffer.writer().any();
 
-    var env_alloc = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+    var env_alloc = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
     defer env_alloc.deinit();
     var env = Environment.init(env_alloc.allocator());
 
@@ -21,11 +21,11 @@ pub fn start(stdout: AnyWriter) !void {
         const raw_input = c_imports.readline(">> ") orelse return;
         // defer c_imports.rl_free(raw_input);
         const slice_input = std.mem.span(raw_input);
-        if (std.mem.eql(u8, slice_input, "exit")) return;
+        if (std.mem.eql(u8, slice_input, ".exit")) return;
         if (slice_input.len == 0) continue;
         _ = c_imports.add_history(raw_input);
 
-        var loop_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+        var loop_arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer loop_arena.deinit();
         const loop_alloc = loop_arena.allocator();
 

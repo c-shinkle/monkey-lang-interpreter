@@ -1,10 +1,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Token = @This();
-
 token_type: TokenType,
 literal: []const u8,
+
+const Token = @This();
 
 pub fn dupe(self: Token, alloc: Allocator) Allocator.Error!Token {
     const literal = if (self.token_type.isLiteralAllocated())

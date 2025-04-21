@@ -11,6 +11,11 @@ const TokenType = Token.TokenType;
 const Operator = Token.Operator;
 const findOperatorByLiteral = Token.findOperatorByLiteral;
 
+lexer: *Lexer,
+cur_token: Token,
+peek_token: Token,
+errors: std.ArrayListUnmanaged([]const u8),
+
 const Parser = @This();
 
 const ParserError = error{
@@ -54,11 +59,6 @@ fn getPrecedence(_type: TokenType) Precedence {
         else => Precedence.lowest,
     };
 }
-
-lexer: *Lexer,
-cur_token: Token,
-peek_token: Token,
-errors: std.ArrayListUnmanaged([]const u8),
 
 // Initialization
 
@@ -115,14 +115,15 @@ pub fn parseProgram(self: *Parser, alloc: Allocator) ParserError!ast.Program {
             ParserError.MissingRightBracket,
             ParserError.MissingRightParenthesis,
             ParserError.UnknownOperatorToken,
-            ParserError.UnknownPrefixToken,
             => {},
+            ParserError.UnknownPrefixToken => {
+                const fmt = "no prefix parse function for {any} found";
+                try self.appendParseError(alloc, fmt, .{self.cur_token.token_type});
+            },
             ParserError.InvalidCharacter, ParserError.Overflow => {
                 const fmt = "could not parse {s} as integer";
                 const args = .{self.cur_token.literal};
-                const msg = try std.fmt.allocPrint(alloc, fmt, args);
-                errdefer alloc.free(msg);
-                try self.errors.append(alloc, msg);
+                try appendParseError(self, alloc, fmt, args);
             },
             ParserError.OutOfMemory => return ParserError.OutOfMemory,
         }
@@ -240,7 +241,6 @@ pub fn parseExpression(
 ) ParserError!Expression {
     const precedence_int = @intFromEnum(precedence);
     const prefix = lookupPrefixParseFns(self.cur_token.token_type) orelse {
-        try self.noPrefixParseFnError(alloc, self.cur_token.token_type);
         return ParserError.UnknownPrefixToken;
     };
 
@@ -416,7 +416,10 @@ fn parseFunctionLiteral(self: *Parser, alloc: Allocator) ParserError!Expression 
     };
 }
 
-fn parseFunctionParameters(self: *Parser, alloc: Allocator) ParserError![]ast.Identifier {
+fn parseFunctionParameters(
+    self: *Parser,
+    alloc: Allocator,
+) ParserError![]ast.Identifier {
     var identifiers = std.ArrayListUnmanaged(ast.Identifier).empty;
     errdefer identifiers.deinit(alloc);
 
@@ -609,9 +612,13 @@ fn peekErrors(self: *Parser, alloc: Allocator, t: TokenType) !void {
     try self.errors.append(alloc, msg);
 }
 
-fn noPrefixParseFnError(self: *Parser, alloc: Allocator, t: TokenType) !void {
-    const fmt = "no prefix parse function for {any} found";
-    const msg = try std.fmt.allocPrint(alloc, fmt, .{t});
+fn appendParseError(
+    self: *Parser,
+    alloc: Allocator,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    const msg = try std.fmt.allocPrint(alloc, fmt, args);
     errdefer alloc.free(msg);
     try self.errors.append(alloc, msg);
 }
