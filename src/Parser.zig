@@ -106,26 +106,8 @@ pub fn parseProgram(self: *Parser, alloc: Allocator) ParserError!ast.Program {
 
         if (maybe_stmt) |stmt| {
             try list.append(alloc, stmt);
-        } else |err| switch (err) {
-            ParserError.MissingLeftBrace,
-            ParserError.MissingLeftParenthesis,
-            ParserError.MissingLetAssign,
-            ParserError.MissingLetIdentifier,
-            ParserError.MissingRightBrace,
-            ParserError.MissingRightBracket,
-            ParserError.MissingRightParenthesis,
-            ParserError.UnknownOperatorToken,
-            => {},
-            ParserError.UnknownPrefixToken => {
-                const fmt = "no prefix parse function for {any} found";
-                try self.appendParseError(alloc, fmt, .{self.cur_token.token_type});
-            },
-            ParserError.InvalidCharacter, ParserError.Overflow => {
-                const fmt = "could not parse {s} as integer";
-                const args = .{self.cur_token.literal};
-                try appendParseError(self, alloc, fmt, args);
-            },
-            ParserError.OutOfMemory => return ParserError.OutOfMemory,
+        } else |err| {
+            try handleParserError(self, alloc, err);
         }
 
         self.nextToken();
@@ -154,7 +136,6 @@ fn parseLetStatement(self: *Parser, alloc: Allocator) ParserError!ast.LetStateme
     const let_token = self.cur_token;
 
     if (!self.expectPeek(.identifier)) {
-        try self.peekErrors(alloc, .identifier);
         return ParserError.MissingLetIdentifier;
     }
 
@@ -164,7 +145,6 @@ fn parseLetStatement(self: *Parser, alloc: Allocator) ParserError!ast.LetStateme
     };
 
     if (!self.expectPeek(.assign)) {
-        try self.peekErrors(alloc, .assign);
         return ParserError.MissingLetAssign;
     }
 
@@ -605,22 +585,53 @@ fn expectPeek(self: *Parser, token: TokenType) bool {
     }
 }
 
-fn peekErrors(self: *Parser, alloc: Allocator, t: TokenType) !void {
-    const fmt = "expected next token to be {any}, got {any} instead";
-    const msg = try std.fmt.allocPrint(alloc, fmt, .{ t, self.peek_token.token_type });
-    errdefer alloc.free(msg);
-    try self.errors.append(alloc, msg);
-}
-
-fn appendParseError(
-    self: *Parser,
-    alloc: Allocator,
-    comptime fmt: []const u8,
-    args: anytype,
-) !void {
-    const msg = try std.fmt.allocPrint(alloc, fmt, args);
-    errdefer alloc.free(msg);
-    try self.errors.append(alloc, msg);
+fn handleParserError(self: *Parser, alloc: Allocator, err: ParserError) !void {
+    switch (err) {
+        ParserError.MissingLeftBrace,
+        ParserError.MissingLeftParenthesis,
+        ParserError.MissingRightBrace,
+        ParserError.MissingRightBracket,
+        ParserError.MissingRightParenthesis,
+        ParserError.UnknownOperatorToken,
+        => {},
+        ParserError.MissingLetAssign => {
+            const msg = try std.fmt.allocPrint(
+                alloc,
+                "expected next token to be TokenType.assign, got TokenType.{s} instead",
+                .{@tagName(self.peek_token.token_type)},
+            );
+            errdefer alloc.free(msg);
+            try self.errors.append(alloc, msg);
+        },
+        ParserError.MissingLetIdentifier => {
+            const msg = try std.fmt.allocPrint(
+                alloc,
+                "expected next token to be TokenType.identifier, got TokenType.{s} instead",
+                .{@tagName(self.peek_token.token_type)},
+            );
+            errdefer alloc.free(msg);
+            try self.errors.append(alloc, msg);
+        },
+        ParserError.UnknownPrefixToken => {
+            const msg = try std.fmt.allocPrint(
+                alloc,
+                "no prefix parse function for {any} found",
+                .{self.cur_token.token_type},
+            );
+            errdefer alloc.free(msg);
+            try self.errors.append(alloc, msg);
+        },
+        ParserError.InvalidCharacter, ParserError.Overflow => {
+            const msg = try std.fmt.allocPrint(
+                alloc,
+                "could not parse {s} as integer",
+                .{self.cur_token.literal},
+            );
+            errdefer alloc.free(msg);
+            try self.errors.append(alloc, msg);
+        },
+        ParserError.OutOfMemory => return ParserError.OutOfMemory,
+    }
 }
 
 fn peekPrecedence(self: *const Parser) Precedence {
@@ -699,10 +710,10 @@ test "Out of Memory, with Parser errors" {
     ;
 
     const expecteds = [_][]const u8{
-        "expected next token to be Token.TokenType.assign, got Token.TokenType.int instead",
-        "expected next token to be Token.TokenType.identifier, got Token.TokenType.assign instead",
+        "expected next token to be TokenType.assign, got TokenType.int instead",
+        "expected next token to be TokenType.identifier, got TokenType.assign instead",
         "no prefix parse function for Token.TokenType.assign found",
-        "expected next token to be Token.TokenType.identifier, got Token.TokenType.int instead",
+        "expected next token to be TokenType.identifier, got TokenType.int instead",
     };
 
     try testing.checkAllAllocationFailures(
