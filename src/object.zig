@@ -17,6 +17,7 @@ pub const ERROR_OBJ = "ERROR";
 pub const FUNCTION_OBJ = "FUNCTION";
 pub const STRING_OBJ = "STRING";
 pub const BUILTIN_OBJ = "BUILTIN";
+pub const ARRAY_OBJ = "ARRAY";
 
 pub const TRUE = Object{ .boolean = Boolean{ .value = true } };
 pub const FALSE = Object{ .boolean = Boolean{ .value = false } };
@@ -31,6 +32,7 @@ pub const Object = union(enum) {
     function: Function,
     string: String,
     builtin: Builtin,
+    array: Array,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
@@ -42,6 +44,7 @@ pub const Object = union(enum) {
             .function => FUNCTION_OBJ,
             .string => STRING_OBJ,
             .builtin => BUILTIN_OBJ,
+            .array => ARRAY_OBJ,
         };
     }
 
@@ -253,6 +256,38 @@ pub const Builtin = struct {
 
     pub fn dupe(self: Builtin, _: Allocator) Allocator.Error!Object {
         return Object{ .builtin = self };
+    }
+};
+
+pub const Array = struct {
+    elements: []const Object,
+
+    pub fn inspect(array: *const Array, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.writeByte('[');
+
+        for (array.elements) |element| {
+            try element.inspect(writer);
+        }
+
+        try writer.writeByte(']');
+    }
+
+    pub fn deinit(array: *const Array, alloc: Allocator) void {
+        for (array.elements) |element| {
+            element.deinit(alloc);
+        }
+
+        alloc.free(array.elements);
+    }
+
+    pub fn dupe(self: Array, alloc: Allocator) Allocator.Error!Object {
+        const duped_elements = try alloc.alloc(Object, self.elements.len);
+
+        for (0..self.elements.len) |i| {
+            duped_elements[i] = try self.elements[i].dupe(alloc);
+        }
+
+        return Object{ .array = Array{ .elements = duped_elements } };
     }
 };
 

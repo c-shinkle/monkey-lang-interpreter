@@ -37,7 +37,15 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
             .call_expression => |call_fn| try evalCallExpression(alloc, call_fn, env),
             .string_literal => |string_lit| try evalStringLiteral(alloc, string_lit),
-            .array_literal => unreachable,
+            .array_literal => |array_lit| {
+                const elements = try evalExpressions(alloc, array_lit.elements, env);
+
+                if (elements.len == 1 or isError(elements[0])) {
+                    return elements[0];
+                }
+
+                return obj.Object{ .array = obj.Array{ .elements = elements } };
+            },
             .index_expression => unreachable,
         },
     };
@@ -892,6 +900,25 @@ test "Builtin Functions, with Errors" {
         try testing.expect(actual == ._error);
         try testing.expectEqualStrings(builtin_test.expected, actual._error.message);
     }
+}
+
+test "Array Literals" {
+    const input = "[1, 2 * 2, 3 + 3]";
+
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const actual = try testEval(input, arena.allocator()) orelse
+        return error.TestExpectedEqual;
+
+    const array = switch (actual) {
+        .array => |array| array,
+        else => return error.TestExpectedEqual,
+    };
+
+    try testing.expectEqual(3, array.elements.len);
+    try testIntegerObject(1, array.elements[0]);
+    try testIntegerObject(4, array.elements[1]);
+    try testIntegerObject(6, array.elements[2]);
 }
 
 // Test Helpers
