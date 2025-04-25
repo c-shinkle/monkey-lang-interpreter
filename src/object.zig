@@ -115,7 +115,7 @@ pub const ReturnValue = struct {
     value: ?*Object,
 
     pub fn inspect(self: *const ReturnValue, writer: AnyWriter) AnyWriter.Error!void {
-        if (self.value) |value| try value.inspect(writer) else try writer.print("null", .{});
+        if (self.value) |value| try value.inspect(writer) else try writer.writeAll("null");
     }
 
     pub fn deinit(self: *const ReturnValue, alloc: Allocator) void {
@@ -262,11 +262,15 @@ pub const Builtin = struct {
 pub const Array = struct {
     elements: []const Object,
 
-    pub fn inspect(array: *const Array, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Array, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeByte('[');
 
-        for (array.elements) |element| {
-            try element.inspect(writer);
+        if (self.elements.len > 0) {
+            try self.elements[0].inspect(writer);
+            for (self.elements[1..]) |element| {
+                try writer.writeAll(", ");
+                try element.inspect(writer);
+            }
         }
 
         try writer.writeByte(']');

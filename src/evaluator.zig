@@ -40,13 +40,13 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             .array_literal => |array_lit| {
                 const elements = try evalExpressions(alloc, array_lit.elements, env);
 
-                if (elements.len == 1 or isError(elements[0])) {
+                if (elements.len == 1 and isError(elements[0])) {
                     return elements[0];
                 }
 
                 return obj.Object{ .array = obj.Array{ .elements = elements } };
             },
-            .index_expression => unreachable,
+            .index_expression => |index_exp| try evalIndexExpression(alloc, index_exp, env),
         },
     };
 }
@@ -450,6 +450,38 @@ fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalEr
     return obj.Object{ .string = obj.String{ .value = duped_value.string_literal.token.literal } };
 }
 
+fn evalIndexExpression(
+    alloc: Allocator,
+    index_exp: ast.IndexExpression,
+    env: *Environment,
+) EvalError!?obj.Object {
+    const left_node = ast.Node{ .expression = index_exp.left.* };
+    const left_eval = try eval(alloc, left_node, env);
+    if (isError(left_eval)) {
+        return left_eval;
+    }
+
+    const index_node = ast.Node{ .expression = index_exp.index.* };
+    const index_eval = try eval(alloc, index_node, env);
+    if (isError(index_eval)) {
+        return index_eval;
+    }
+
+    if (left_eval.? == .array and index_eval.? == .integer) {
+        const index_value = index_eval.?.integer.value;
+        const elements = left_eval.?.array.elements;
+
+        if (index_value < 0 or index_value >= elements.len) {
+            return obj.NULL;
+        }
+
+        return elements[@intCast(index_value)];
+    } else {
+        const fmt = "index operator not supported: {s}";
+        return try newError(alloc, fmt, .{left_eval.?._type()});
+    }
+}
+
 // Test Suite
 
 test "Out of Memory, Without Errors" {
@@ -578,7 +610,6 @@ test "String Expression" {
     defer arena.deinit();
 
     var env = Environment.init(arena.allocator());
-
     var lexer = Lexer.init("\"Hello, World!\";");
     var parser = try Parser.init(&lexer, arena.allocator());
     const program = try parser.parseProgram(arena.allocator());
@@ -642,11 +673,7 @@ test "If Else Expressions" {
         var arena = ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const actual = (try testEval(eval_test.input, arena.allocator())).?;
-        if (eval_test.expected) |expected| {
-            try testIntegerObject(expected, actual);
-        } else {
-            try testNullObject(actual);
-        }
+        try testAnyObject(eval_test.expected, actual);
     }
 }
 
@@ -866,17 +893,22 @@ test "Enclosing Environments" {
 }
 
 test "Builtin Functions, no Errors" {
-    const builtin_tests = [_]struct { input: []const u8, expected: i64 }{
+    const builtin_tests = .{
         .{ .input = "len(\"\");", .expected = 0 },
         .{ .input = "len(\"four\");", .expected = 4 },
         .{ .input = "len(\"hello world\");", .expected = 11 },
+        .{ .input = "len([1, 2, 3]);", .expected = 3 },
+        .{ .input = "len([]);", .expected = 0 },
+        .{ .input = "first([1, 2, 3]);", .expected = 1 },
+        .{ .input = "first([\"a\", \"b\", \"c\"]);", .expected = "a" },
+        .{ .input = "first([]);", .expected = null },
     };
 
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    for (builtin_tests) |builtin_test| {
-        const actual = (try testEval(builtin_test.input, arena.allocator())).?;
-        try testIntegerObject(builtin_test.expected, actual);
+    inline for (builtin_tests) |builtin_test| {
+        const actual = try testEval(builtin_test.input, arena.allocator());
+        try testAnyObject(builtin_test.expected, actual);
     }
 }
 
@@ -889,6 +921,14 @@ test "Builtin Functions, with Errors" {
         .{
             .input = "len(\"one\", \"two\");",
             .expected = "wrong number of arguments. got=2, want=1",
+        },
+        .{
+            .input = "first(1);",
+            .expected = "argument to 'first' must be ARRAY, got INTEGER",
+        },
+        .{
+            .input = "first();",
+            .expected = "wrong number of arguments. got=0, want=1",
         },
     };
 
@@ -921,6 +961,30 @@ test "Array Literals" {
     try testIntegerObject(6, array.elements[2]);
 }
 
+test "Array Index Expression" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const array_tests = [_]struct { input: []const u8, expected: ?i64 }{
+        .{ .input = "[1, 2, 3][0]", .expected = 1 },
+        .{ .input = "[1, 2, 3][1]", .expected = 2 },
+        .{ .input = "[1, 2, 3][2]", .expected = 3 },
+        .{ .input = "let i = 0; [1][i]", .expected = 1 },
+        .{ .input = "[1, 2, 3][1 + 1]", .expected = 3 },
+        .{ .input = "let myArray = [1, 2, 3]; myArray[2]", .expected = 3 },
+        .{ .input = "let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2]", .expected = 6 },
+        .{ .input = "let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i];", .expected = 2 },
+        .{ .input = "[1, 2, 3][3]", .expected = null },
+        .{ .input = "[1, 2, 3][-1]", .expected = null },
+        .{ .input = "[][0]", .expected = null },
+    };
+
+    for (array_tests) |array_test| {
+        const actual = try testEval(array_test.input, arena.allocator());
+        try testAnyObject(array_test.expected, actual);
+    }
+}
+
 // Test Helpers
 
 fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
@@ -937,22 +1001,46 @@ fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
     return try eval(alloc, node, &env);
 }
 
-fn testAnyObject(expected: anytype, actual: ?obj.Object) !void {
+fn testAnyObject(expected: anytype, maybe_actual: ?obj.Object) !void {
     const type_info = @typeInfo(@TypeOf(expected));
-    // std.debug.print("{}\n", .{type_info});
-    if (actual) |some| {
-        switch (type_info) {
-            .comptime_int, .int => try testIntegerObject(expected, some),
-            .bool => try testBooleanObject(expected, some),
-            .pointer => |pointer| switch (pointer.size) {
-                .one => try testStringObject(expected, some),
-                else => error.TestExpectedEqual,
-            },
-            else => error.TestExpectedEqual,
+    if (type_info == .pointer) {
+        const child = @typeInfo(type_info.pointer.child);
+        if (child != .array or child.array.child != u8) {
+            @compileLog(child);
+            @compileError("Wrong types. See Compile Log output for details");
         }
-    } else {
-        try testing.expect(type_info == .null);
     }
+    if (maybe_actual == null) {
+        switch (type_info) {
+            .pointer => std.debug.print("expected = {s}", .{expected}),
+            .optional => std.debug.print("expected = {?}", .{expected}),
+            else => std.debug.print("expected = {any}", .{expected}),
+        }
+        std.debug.print("actual = null\n", .{});
+        return error.TestExpectedEqual;
+    }
+
+    const actual = maybe_actual.?;
+    return switch (type_info) {
+        .comptime_int, .int => try testIntegerObject(expected, actual),
+        .bool => try testBooleanObject(expected, actual),
+        .pointer => |pointer| switch (pointer.size) {
+            .one, .slice => try testStringObject(expected, actual),
+            else => error.TestExpectedEqual,
+        },
+        .null => try testNullObject(actual),
+        .optional => |optional| blk: {
+            if (expected) |some_exp| {
+                break :blk switch (@typeInfo(optional.child)) {
+                    .comptime_int, .int => try testIntegerObject(some_exp, actual),
+                    else => error.TestExpectedEqual,
+                };
+            } else {
+                break :blk try testNullObject(actual);
+            }
+        },
+        else => error.TestExpectedEqual,
+    };
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
