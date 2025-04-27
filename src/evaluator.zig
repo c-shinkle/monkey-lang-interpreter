@@ -37,15 +37,7 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
             .call_expression => |call_fn| try evalCallExpression(alloc, call_fn, env),
             .string_literal => |string_lit| try evalStringLiteral(alloc, string_lit),
-            .array_literal => |array_lit| {
-                const elements = try evalExpressions(alloc, array_lit.elements, env);
-
-                if (elements.len == 1 and isError(elements[0])) {
-                    return elements[0];
-                }
-
-                return obj.Object{ .array = obj.Array{ .elements = elements } };
-            },
+            .array_literal => |array_lit| try evalArrayLiteral(alloc, array_lit, env),
             .index_expression => |index_exp| try evalIndexExpression(alloc, index_exp, env),
         },
     };
@@ -90,7 +82,10 @@ fn evalLetStatement(
 ) EvalError!?obj.Object {
     const child_node = ast.Node{ .expression = let_stmt.value };
     const let_value = try eval(alloc, child_node, env) orelse return null;
-    if (isError(let_value)) return let_value;
+
+    if (isError(let_value)) {
+        return let_value;
+    }
     defer let_value.deinit(alloc);
 
     try env.set(let_stmt.name.value, let_value);
@@ -123,7 +118,9 @@ fn evalReturnStatement(
     const child_node = ast.Node{ .expression = stmt.return_value };
     const object = try eval(alloc, child_node, env) orelse
         return obj.Object{ .return_value = obj.ReturnValue{ .value = null } };
-    if (isError(object)) return object;
+    if (isError(object)) {
+        return object;
+    }
     errdefer object.deinit(alloc);
 
     const value = try alloc.create(obj.Object);
@@ -138,7 +135,9 @@ fn evalPrefixExpression(
 ) EvalError!?obj.Object {
     const child_node = ast.Node{ .expression = prefix.right.* };
     const right = try eval(alloc, child_node, env) orelse return null;
-    if (isError(right)) return right;
+    if (isError(right)) {
+        return right;
+    }
     defer right.deinit(alloc);
 
     return switch (prefix.operator) {
@@ -173,12 +172,16 @@ fn evalInfixOperatorExpression(
 ) EvalError!?obj.Object {
     const left_node = ast.Node{ .expression = infix.left.* };
     const left_obj = try eval(alloc, left_node, env) orelse return null;
-    if (isError(left_obj)) return left_obj;
+    if (isError(left_obj)) {
+        return left_obj;
+    }
     defer left_obj.deinit(alloc);
 
     const right_node = ast.Node{ .expression = infix.right.* };
     const right_obj = try eval(alloc, right_node, env) orelse return null;
-    if (isError(right_obj)) return right_obj;
+    if (isError(right_obj)) {
+        return right_obj;
+    }
     defer right_obj.deinit(alloc);
 
     const op = infix.operator;
@@ -262,7 +265,9 @@ fn evalIfExpression(
 ) EvalError!?obj.Object {
     const condition = try eval(alloc, ast.Node{ .expression = if_exp.condition.* }, env);
     errdefer if (condition) |cond| cond.deinit(alloc);
-    if (isError(condition)) return condition;
+    if (isError(condition)) {
+        return condition;
+    }
 
     if (isTruthy(condition)) {
         const stmt = ast.Statement{ .block_statement = if_exp.consequence.* };
@@ -312,7 +317,9 @@ fn evalFunctionLiteral(
 ) EvalError!obj.Object {
     var duped_array_list = std.ArrayListUnmanaged(ast.Identifier).empty;
     errdefer {
-        for (duped_array_list.items) |duped_param| duped_param.dupe_deinit(alloc);
+        for (duped_array_list.items) |duped_param| {
+            duped_param.dupe_deinit(alloc);
+        }
         duped_array_list.deinit(alloc);
     }
 
@@ -325,7 +332,9 @@ fn evalFunctionLiteral(
 
     const duped_parameters = try duped_array_list.toOwnedSlice(alloc);
     errdefer {
-        for (duped_parameters) |duped_param| duped_param.dupe_deinit(alloc);
+        for (duped_parameters) |duped_param| {
+            duped_param.dupe_deinit(alloc);
+        }
         alloc.free(duped_parameters);
     }
 
@@ -356,15 +365,21 @@ fn evalCallExpression(
     // Either Identifier or FunctionLiteral
     // Missing Identifier returns an error, FunctionLiteral never returns null
     const evaluated = (try eval(alloc, node_call_exp, env)).?;
-    if (isError(evaluated)) return evaluated;
+    if (isError(evaluated)) {
+        return evaluated;
+    }
     defer evaluated.deinit(alloc);
 
     const args = try evalExpressions(alloc, duped_call_exp.arguments, env);
     defer {
-        for (args) |arg| arg.deinit(alloc);
+        for (args) |arg| {
+            arg.deinit(alloc);
+        }
         alloc.free(args);
     }
-    if (args.len == 1 and isError(args[0])) return args[0];
+    if (args.len == 1 and isError(args[0])) {
+        return args[0];
+    }
 
     return switch (evaluated) {
         .function => |func| applyFunction(alloc, func, args),
@@ -380,7 +395,9 @@ fn evalExpressions(
 ) EvalError![]const obj.Object {
     var evaluateds = std.ArrayListUnmanaged(obj.Object).empty;
     errdefer {
-        for (evaluateds.items) |object| object.deinit(alloc);
+        for (evaluateds.items) |object| {
+            object.deinit(alloc);
+        }
         evaluateds.deinit(alloc);
     }
 
@@ -448,6 +465,18 @@ fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalEr
     const duped_value = try string_literal.dupe(alloc);
     std.debug.assert(duped_value == .string_literal);
     return obj.Object{ .string = obj.String{ .value = duped_value.string_literal.token.literal } };
+}
+
+fn evalArrayLiteral(
+    alloc: Allocator,
+    array_lit: ast.ArrayLiteral,
+    env: *Environment,
+) EvalError!obj.Object {
+    const elements = try evalExpressions(alloc, array_lit.elements, env);
+    if (elements.len == 1 and isError(elements[0])) {
+        return elements[0];
+    }
+    return obj.Object{ .array = obj.Array{ .elements = elements } };
 }
 
 fn evalIndexExpression(
