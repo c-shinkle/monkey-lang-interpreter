@@ -217,6 +217,9 @@ pub const Function = struct {
             duped_env_ptr.deinit();
             self.env.alloc.destroy(duped_env_ptr);
         };
+        // std.debug.print("Duping object.Function\n", .{});
+        // self.env.print();
+        // std.debug.print("------\n", .{});
 
         return Object{
             .function = Function{

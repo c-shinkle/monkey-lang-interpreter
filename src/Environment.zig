@@ -28,9 +28,11 @@ pub fn dupe(self: *const Environment) Allocator.Error!Environment {
 
     var iter = self.store.iterator();
     while (iter.next()) |entry| {
+        const duped_key = try duped_env.alloc.dupe(u8, entry.key_ptr.*);
+        errdefer duped_env.alloc.free(duped_key);
         const duped_value = try entry.value_ptr.dupe(duped_env.alloc);
         errdefer duped_value.deinit(duped_env.alloc);
-        try duped_env.set(entry.key_ptr.*, duped_value);
+        try duped_env.set(duped_key, duped_value);
     }
 
     return duped_env;
@@ -56,6 +58,17 @@ pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Er
 
 pub fn isRootEnvironment(self: *const Environment) bool {
     return self.outer == null;
+}
+
+pub fn print(self: *const Environment) void {
+    if (self.outer) |outer| {
+        outer.print();
+    }
+    std.debug.print("{*}\n", .{self});
+    var iter = self.store.keyIterator();
+    while (iter.next()) |key| {
+        std.debug.print("{s}\n", .{key.*});
+    }
 }
 
 test {
