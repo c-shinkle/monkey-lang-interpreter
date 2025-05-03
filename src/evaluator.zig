@@ -550,6 +550,25 @@ test "Out of Memory, Without Errors" {
         ,
         "\"Hello, World!\"",
         "\"Hello, \" + \"World!\"",
+        "let x = [\"a\", \"b\", \"c\"]; first(a)",
+        "let x = [\"a\", \"b\", \"c\"]; last(a)",
+        "let x = [\"a\", \"b\", \"c\"]; rest(a)",
+        "let x = [\"a\", \"b\", \"c\"]; push(\"d\")",
+        // \\let map = fn(arr, f) {
+        // \\    let iter = fn(arr, accumualted) {
+        // \\        if (len(arr) == 0) {
+        // \\            accumulated
+        // \\        }
+        // \\        else {
+        // \\            iter(rest(arr), push(accumulated, f(first(arr))));
+        // \\        }
+        // \\    };
+        // \\    iter(arr, []);
+        // \\};
+        // \\let a = [1, 2, 3, 4];
+        // \\let double = fn(x) { x * 2 };
+        // \\map(a, double);
+        // ,
     };
 
     for (inputs) |input| {
@@ -931,13 +950,37 @@ test "Builtin Functions, no Errors" {
         .{ .input = "first([1, 2, 3]);", .expected = 1 },
         .{ .input = "first([\"a\", \"b\", \"c\"]);", .expected = "a" },
         .{ .input = "first([]);", .expected = null },
+        .{ .input = "last([1, 2, 3]);", .expected = 3 },
+        .{ .input = "last([\"a\", \"b\", \"c\"]);", .expected = "c" },
+        .{ .input = "last([]);", .expected = null },
+        .{ .input = "rest([1, 2, 3]);", .expected = [_]i64{ 2, 3 } },
+        .{ .input = "rest([\"a\", \"b\", \"c\"]);", .expected = [_][]const u8{ "b", "c" } },
+        .{ .input = "rest([1]);", .expected = [_]i64{} },
+        .{ .input = "rest([]);", .expected = null },
+        .{ .input = "push([1, 2, 3], 4)", .expected = [_]i64{ 1, 2, 3, 4 } },
+        .{
+            .input = "push([\"a\", \"b\", \"c\"], \"d\")",
+            .expected = [_][]const u8{ "a", "b", "c", "d" },
+        },
+        .{ .input = "push([], 1)", .expected = [_]i64{1} },
     };
 
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     inline for (builtin_tests) |builtin_test| {
         const actual = try testEval(builtin_test.input, arena.allocator());
-        try testAnyObject(builtin_test.expected, actual);
+        const type_info = @typeInfo(@TypeOf(builtin_test.expected));
+        if (type_info != .array) {
+            try testAnyObject(builtin_test.expected, actual);
+        } else {
+            try testing.expect(actual != null and actual.? == .array);
+            const actual_arr = actual.?.array;
+
+            try testing.expectEqual(builtin_test.expected.len, actual_arr.elements.len);
+            for (0..builtin_test.expected.len) |i| {
+                try testAnyObject(builtin_test.expected[i], actual_arr.elements[i]);
+            }
+        }
     }
 }
 
@@ -957,6 +1000,22 @@ test "Builtin Functions, with Errors" {
         },
         .{
             .input = "first();",
+            .expected = "wrong number of arguments. got=0, want=1",
+        },
+        .{
+            .input = "last(1);",
+            .expected = "argument to 'last' must be ARRAY, got INTEGER",
+        },
+        .{
+            .input = "last();",
+            .expected = "wrong number of arguments. got=0, want=1",
+        },
+        .{
+            .input = "rest(1);",
+            .expected = "argument to 'rest' must be ARRAY, got INTEGER",
+        },
+        .{
+            .input = "rest();",
             .expected = "wrong number of arguments. got=0, want=1",
         },
     };
@@ -1014,6 +1073,29 @@ test "Array Index Expression" {
     }
 }
 
+test "Function with Builtins" {
+    const input =
+        \\let map = fn(arr, f) { 
+        \\    let iter = fn(arr, accumualted) { 
+        \\        if (len(arr) == 0) { 
+        \\            accumulated
+        \\        } 
+        \\        else { 
+        \\            iter(rest(arr), push(accumulated, f(first(arr)))); 
+        \\        } 
+        \\    }; 
+        \\    iter(arr, []); 
+        \\};
+        \\let a = [1, 2, 3, 4];
+        \\let double = fn(x) { x * 2 };
+        \\map(a, double);
+    ;
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    _ = try testEval(input, arena.allocator());
+}
+
 // Test Helpers
 
 fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
@@ -1033,9 +1115,14 @@ fn testEval(input: []const u8, alloc: Allocator) !?obj.Object {
 fn testAnyObject(expected: anytype, maybe_actual: ?obj.Object) !void {
     const type_info = @typeInfo(@TypeOf(expected));
     if (type_info == .pointer) {
-        const child = @typeInfo(type_info.pointer.child);
-        if (child != .array or child.array.child != u8) {
-            @compileLog(child);
+        const is_string_slice = type_info.pointer.size == .slice and type_info.pointer.child == u8;
+        const child_type_info = @typeInfo(type_info.pointer.child);
+        const is_child_array_byte = child_type_info == .array and child_type_info.array.child == u8;
+        if (!(is_child_array_byte or is_string_slice)) {
+            // @compileLog("parent type info");
+            @compileLog(type_info);
+            // @compileLog("child type info");
+            // @compileLog(child_type_info);
             @compileError("Wrong types. See Compile Log output for details");
         }
     }
@@ -1045,31 +1132,31 @@ fn testAnyObject(expected: anytype, maybe_actual: ?obj.Object) !void {
             .optional => std.debug.print("expected = {?}", .{expected}),
             else => std.debug.print("expected = {any}", .{expected}),
         }
-        std.debug.print("actual = null\n", .{});
+        std.debug.print(" actual = null\n", .{});
         return error.TestExpectedEqual;
     }
 
     const actual = maybe_actual.?;
-    return switch (type_info) {
+    switch (type_info) {
         .comptime_int, .int => try testIntegerObject(expected, actual),
         .bool => try testBooleanObject(expected, actual),
         .pointer => |pointer| switch (pointer.size) {
             .one, .slice => try testStringObject(expected, actual),
-            else => error.TestExpectedEqual,
+            else => return error.TestExpectedEqual,
         },
         .null => try testNullObject(actual),
-        .optional => |optional| blk: {
+        .optional => |optional| {
             if (expected) |some_exp| {
-                break :blk switch (@typeInfo(optional.child)) {
+                switch (@typeInfo(optional.child)) {
                     .comptime_int, .int => try testIntegerObject(some_exp, actual),
-                    else => error.TestExpectedEqual,
-                };
+                    else => return error.TestExpectedEqual,
+                }
             } else {
-                break :blk try testNullObject(actual);
+                try testNullObject(actual);
             }
         },
-        else => error.TestExpectedEqual,
-    };
+        else => return error.TestExpectedEqual,
+    }
 }
 
 fn testIntegerObject(expected: i64, actual: obj.Object) !void {
