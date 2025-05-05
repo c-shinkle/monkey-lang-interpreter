@@ -34,9 +34,11 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             .infix_expression => |infix| try evalInfixOperatorExpression(alloc, infix, env),
             .boolean_expression => |boolean| if (boolean.value) obj.TRUE else obj.FALSE,
             .if_expression => |if_exp| try evalIfExpression(alloc, if_exp, env),
-            .function_literal => |fn_lit| try evalFunctionLiteral(alloc, fn_lit, env),
+            .function_literal => |fn_lit| evalFunctionLiteral(fn_lit, env),
             .call_expression => |call_fn| try evalCallExpression(alloc, call_fn, env),
-            .string_literal => |string_lit| try evalStringLiteral(alloc, string_lit),
+            .string_literal => |string_lit| obj.Object{
+                .string = obj.String{ .value = string_lit.token.literal },
+            },
             .array_literal => |array_lit| try evalArrayLiteral(alloc, array_lit, env),
             .index_expression => |index_exp| try evalIndexExpression(alloc, index_exp, env),
         },
@@ -82,6 +84,9 @@ fn evalLetStatement(
     }
 
     try env.set(let_stmt.name.value, let_value);
+    // std.debug.print("evalLetStatement\n", .{});
+    // env.print();
+    // std.debug.print("------\n", .{});
     return null;
 }
 
@@ -290,7 +295,7 @@ fn isError(maybe_object: ?obj.Object) bool {
 
 fn evalIdentifier(alloc: Allocator, ident: ast.Identifier, env: *Environment) EvalError!obj.Object {
     if (env.get(ident.value)) |identifier_value| {
-        return try identifier_value.dupe(alloc);
+        return identifier_value;
     } else if (_builtin.builtin_map.get(ident.value)) |_builtin_value| {
         return _builtin_value;
     } else {
@@ -298,43 +303,18 @@ fn evalIdentifier(alloc: Allocator, ident: ast.Identifier, env: *Environment) Ev
     }
 }
 
-fn evalFunctionLiteral(
-    alloc: Allocator,
-    function_literal: ast.FunctionLiteral,
-    env: *Environment,
-) EvalError!obj.Object {
-    var duped_array_list = std.ArrayListUnmanaged(ast.Identifier).empty;
-
-    for (function_literal.parameters) |param| {
-        const duped_param = try param.dupe(alloc);
-        std.debug.assert(duped_param == .identifier);
-        try duped_array_list.append(alloc, duped_param.identifier);
-    }
-
-    const duped_parameters = try duped_array_list.toOwnedSlice(alloc);
-
-    const duped_body = try function_literal.body.dupe(alloc);
-    std.debug.assert(duped_body == .block_statement);
-
-    return obj.Object{
-        .function = obj.Function{
-            .parameters = duped_parameters,
-            .body = duped_body.block_statement,
-            .env = env,
-        },
-    };
+fn evalFunctionLiteral(function_literal: ast.FunctionLiteral, env: *Environment) obj.Object {
+    const params = function_literal.parameters;
+    const body = function_literal.body;
+    return obj.Object{ .function = obj.Function{ .parameters = params, .body = body, .env = env } };
 }
 
 fn evalCallExpression(
     alloc: Allocator,
-    call_fn: ast.CallExpression,
+    call_exp: ast.CallExpression,
     env: *Environment,
 ) EvalError!?obj.Object {
-    const duped_function = try call_fn.dupe(alloc);
-    std.debug.assert(duped_function == .call_expression);
-    const duped_call_exp = duped_function.call_expression;
-
-    const node_call_exp = ast.Node{ .expression = duped_call_exp.function.* };
+    const node_call_exp = ast.Node{ .expression = call_exp.function.* };
     // Either Identifier or FunctionLiteral
     // Missing Identifier returns an error, FunctionLiteral never returns null
     const evaluated = (try eval(alloc, node_call_exp, env)).?;
@@ -342,7 +322,7 @@ fn evalCallExpression(
         return evaluated;
     }
 
-    const args = try evalExpressions(alloc, duped_call_exp.arguments, env);
+    const args = try evalExpressions(alloc, call_exp.arguments, env);
     if (args.len == 1 and isError(args[0])) {
         return args[0];
     }
@@ -359,20 +339,18 @@ fn evalExpressions(
     exps: []const ast.Expression,
     env: *Environment,
 ) EvalError![]const obj.Object {
-    var evaluateds = std.ArrayListUnmanaged(obj.Object).empty;
+    var objects = try alloc.alloc(obj.Object, exps.len);
 
-    for (exps) |exp| {
+    for (exps, 0..) |exp, i| {
         const evaluated = (try eval(alloc, ast.Node{ .expression = exp }, env)).?;
+        objects[i] = evaluated;
 
         if (isError(evaluated)) {
-            try evaluateds.append(alloc, evaluated);
-            return try evaluateds.toOwnedSlice(alloc);
+            return try alloc.realloc(objects, i + 1);
         }
-
-        try evaluateds.append(alloc, evaluated); // fail_index 39 fails here
     }
 
-    return try evaluateds.toOwnedSlice(alloc);
+    return objects;
 }
 
 fn applyFunction(
@@ -382,24 +360,22 @@ fn applyFunction(
 ) EvalError!?obj.Object {
     const node = ast.Node{ .statement = ast.Statement{ .block_statement = function.body } };
 
-    var extended_environment = Environment{
+    const extended_env = try function.env.alloc.create(Environment);
+    extended_env.* = Environment{
         .alloc = function.env.alloc,
         .store = .empty,
         .outer = function.env,
     };
 
     for (function.parameters, 0..) |param, i| {
-        try extended_environment.set(param.value, arguments[i]);
+        try extended_env.set(param.value, arguments[i]);
     }
-    const duped_env = try function.env.alloc.create(Environment);
-
-    duped_env.* = extended_environment;
-
-    // std.debug.print("Applying Function\n", .{});
-    // extended_environment.print();
+    //
+    // std.debug.print("applyFunction (extended)\n", .{});
+    // extended_env.print();
     // std.debug.print("------\n", .{});
 
-    const maybe_evaluated = try eval(alloc, node, duped_env);
+    const maybe_evaluated = try eval(alloc, node, extended_env);
     if (maybe_evaluated) |object| {
         switch (object) {
             .return_value => |ret_val| {
@@ -410,19 +386,10 @@ fn applyFunction(
                 }
                 return null;
             },
-            .function => {
-                return maybe_evaluated;
-            },
             else => {},
         }
     }
     return maybe_evaluated;
-}
-
-fn evalStringLiteral(alloc: Allocator, string_literal: ast.StringLiteral) EvalError!obj.Object {
-    const duped_value = try string_literal.dupe(alloc);
-    std.debug.assert(duped_value == .string_literal);
-    return obj.Object{ .string = obj.String{ .value = duped_value.string_literal.token.literal } };
 }
 
 fn evalArrayLiteral(
@@ -471,87 +438,87 @@ fn evalIndexExpression(
 
 // Test Suite
 
-// test "Out of Memory, Without Errors" {
-//     const inputs = [_][]const u8{
-//         "5",
-//         "-5",
-//         "2 * (5 + 10)",
-//         "3 * (3 * 3) + 10",
-//         "true",
-//         "false",
-//         "1 < 2",
-//         "1 != 2",
-//         "!!false",
-//         "!!5",
-//         "if (1 < 2) { 10 }",
-//         "if (1 > 2) { 10 }",
-//         "if (1 < 2) { 10 } else { 20 }",
-//         "if (1 > 2) { 10 } else { 20 }",
-//         "9; return 2 * 5; 9;",
-//         "return if (1 < 2) { 10 } else { 20 };",
-//         \\if (10 > 1) {
-//         \\  if (10 > 1) {
-//         \\    return 10;
-//         \\  }
-//         \\
-//         \\  return 1;
-//         \\}
-//         \\let a = 5; let b = a; b;
-//         ,
-//         "fn(x) { x + 2 };",
-//         "let identity = fn(x) { x } ; identity(5);",
-//         "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));",
-//         "fn(x) { x; }(5)",
-//         \\let newAdder = fn(x) { fn(y) { x + y }; };
-//         \\let addTwo = newAdder(2);
-//         \\addTwo(1);
-//         ,
-//         "\"Hello, World!\"",
-//         "\"Hello, \" + \"World!\"",
-//         "let x = [\"a\", \"b\", \"c\"]; first(a)",
-//         "let x = [\"a\", \"b\", \"c\"]; last(a)",
-//         "let x = [\"a\", \"b\", \"c\"]; rest(a)",
-//         "let x = [\"a\", \"b\", \"c\"]; push(\"d\")",
-//         // \\let map = fn(arr, f) {
-//         // \\    let iter = fn(arr, accumualted) {
-//         // \\        if (len(arr) == 0) {
-//         // \\            accumulated
-//         // \\        }
-//         // \\        else {
-//         // \\            iter(rest(arr), push(accumulated, f(first(arr))));
-//         // \\        }
-//         // \\    };
-//         // \\    iter(arr, []);
-//         // \\};
-//         // \\let a = [1, 2, 3, 4];
-//         // \\let double = fn(x) { x * 2 };
-//         // \\map(a, double);
-//         // ,
-//     };
-//
-//     for (inputs) |input| {
-//         try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
-//     }
-// }
-//
-// test "Out of Memory, With Errors" {
-//     const inputs = [_][]const u8{
-//         "5 + true;",
-//         "5 + true; 5;",
-//         "-true",
-//         "true + false;",
-//         "true + false + true + false;",
-//         "5; true + false; 5",
-//         "if (10 > 1) { true + false; }",
-//         "let x = fn() {}; -x;",
-//         "let x = fn() {}; let y = 5; x + y;",
-//         "let x = 5; let y = fn() {}; x + y;",
-//     };
-//
-//     for (inputs) |input| {
-//         try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
-//     }
-// }
+test "Out of Memory, Without Errors" {
+    const inputs = [_][]const u8{
+        "5",
+        "-5",
+        "2 * (5 + 10)",
+        "3 * (3 * 3) + 10",
+        "true",
+        "false",
+        "1 < 2",
+        "1 != 2",
+        "!!false",
+        "!!5",
+        "if (1 < 2) { 10 }",
+        "if (1 > 2) { 10 }",
+        "if (1 < 2) { 10 } else { 20 }",
+        "if (1 > 2) { 10 } else { 20 }",
+        "9; return 2 * 5; 9;",
+        "return if (1 < 2) { 10 } else { 20 };",
+        \\if (10 > 1) {
+        \\  if (10 > 1) {
+        \\    return 10;
+        \\  }
+        \\
+        \\  return 1;
+        \\}
+        \\let a = 5; let b = a; b;
+        ,
+        "fn(x) { x + 2 };",
+        "let identity = fn(x) { x } ; identity(5);",
+        "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));",
+        "fn(x) { x; }(5)",
+        \\let newAdder = fn(x) { fn(y) { x + y }; };
+        \\let addTwo = newAdder(2);
+        \\addTwo(1);
+        ,
+        "\"Hello, World!\"",
+        "\"Hello, \" + \"World!\"",
+        "let x = [\"a\", \"b\", \"c\"]; first(a)",
+        "let x = [\"a\", \"b\", \"c\"]; last(a)",
+        "let x = [\"a\", \"b\", \"c\"]; rest(a)",
+        "let x = [\"a\", \"b\", \"c\"]; push(\"d\")",
+        \\let map = fn(arr, f) {
+        \\    let iter = fn(arr, accumualted) {
+        \\        if (len(arr) == 0) {
+        \\            accumulated
+        \\        }
+        \\        else {
+        \\            iter(rest(arr), push(accumulated, f(first(arr))));
+        \\        }
+        \\    };
+        \\    iter(arr, []);
+        \\};
+        \\let a = [1, 2, 3, 4];
+        \\let double = fn(x) { x * 2 };
+        \\map(a, double);
+        ,
+    };
+
+    for (inputs) |input| {
+        try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
+    }
+}
+
+test "Out of Memory, With Errors" {
+    const inputs = [_][]const u8{
+        "5 + true;",
+        "5 + true; 5;",
+        "-true",
+        "true + false;",
+        "true + false + true + false;",
+        "5; true + false; 5",
+        "if (10 > 1) { true + false; }",
+        "let x = fn() {}; -x;",
+        "let x = fn() {}; let y = 5; x + y;",
+        "let x = 5; let y = fn() {}; x + y;",
+    };
+
+    for (inputs) |input| {
+        try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
+    }
+}
 
 test "Integer Expression" {
     const eval_tests = [_]struct { input: []const u8, expected: i64 }{

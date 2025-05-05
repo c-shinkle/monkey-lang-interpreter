@@ -181,11 +181,6 @@ pub const Function = struct {
         alloc.free(self.parameters);
 
         self.body.dupe_deinit(alloc);
-
-        if (!self.env.isRootEnvironment()) {
-            self.env.deinit();
-            self.env.alloc.destroy(self.env);
-        }
     }
 
     pub fn dupe(self: Function, alloc: Allocator) Allocator.Error!Object {
@@ -206,26 +201,11 @@ pub const Function = struct {
         errdefer duped_body.dupe_deinit(alloc);
         std.debug.assert(duped_body == .block_statement);
 
-        var duped_env_ptr = self.env;
-        if (!self.env.isRootEnvironment()) {
-            var duped_env = try self.env.dupe();
-            errdefer duped_env.deinit();
-            duped_env_ptr = try self.env.alloc.create(Environment);
-            duped_env_ptr.* = duped_env;
-        }
-        errdefer if (!self.env.isRootEnvironment()) {
-            duped_env_ptr.deinit();
-            self.env.alloc.destroy(duped_env_ptr);
-        };
-        // std.debug.print("Duping object.Function\n", .{});
-        // self.env.print();
-        // std.debug.print("------\n", .{});
-
         return Object{
             .function = Function{
                 .parameters = try duped_parameters.toOwnedSlice(alloc),
                 .body = duped_body.block_statement,
-                .env = duped_env_ptr,
+                .env = self.env,
             },
         };
     }

@@ -48,7 +48,7 @@ fn first(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
         return obj.NULL;
     }
 
-    return elements[0].dupe(alloc);
+    return elements[0];
 }
 
 fn last(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
@@ -67,7 +67,7 @@ fn last(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
         return obj.NULL;
     }
 
-    return elements[elements.len - 1].dupe(alloc);
+    return elements[elements.len - 1];
 }
 
 fn rest(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
@@ -86,12 +86,7 @@ fn rest(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
         return obj.NULL;
     }
 
-    const duped_elements = try alloc.alloc(obj.Object, original_elements.len - 1);
-    for (0..duped_elements.len) |i| {
-        duped_elements[i] = try original_elements[i + 1].dupe(alloc);
-    }
-
-    return obj.Object{ .array = obj.Array{ .elements = duped_elements } };
+    return obj.Object{ .array = obj.Array{ .elements = original_elements[1..] } };
 }
 
 fn push(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
@@ -107,13 +102,11 @@ fn push(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
 
     const original_elements = args[0].array.elements;
 
-    const duped_elements = try alloc.alloc(obj.Object, original_elements.len + 1);
-    for (0..original_elements.len) |i| {
-        duped_elements[i] = try original_elements[i].dupe(alloc);
-    }
-    duped_elements[original_elements.len] = try args[1].dupe(alloc);
+    const next_elements = try alloc.alloc(obj.Object, original_elements.len + 1);
+    std.mem.copyForwards(obj.Object, next_elements, original_elements);
+    next_elements[original_elements.len] = args[1];
 
-    return obj.Object{ .array = obj.Array{ .elements = duped_elements } };
+    return obj.Object{ .array = obj.Array{ .elements = next_elements } };
 }
 
 test {
