@@ -303,9 +303,9 @@ fn evalIdentifier(alloc: Allocator, ident: ast.Identifier, env: *Environment) Ev
     }
 }
 
-fn evalFunctionLiteral(function_literal: ast.FunctionLiteral, env: *Environment) obj.Object {
-    const params = function_literal.parameters;
-    const body = function_literal.body;
+fn evalFunctionLiteral(fn_lit: ast.FunctionLiteral, env: *Environment) obj.Object {
+    const params = fn_lit.parameters;
+    const body = fn_lit.body;
     return obj.Object{ .function = obj.Function{ .parameters = params, .body = body, .env = env } };
 }
 
@@ -342,6 +342,7 @@ fn evalExpressions(
     var objects = try alloc.alloc(obj.Object, exps.len);
 
     for (exps, 0..) |exp, i| {
+        //TODO how do I know this will never be null today? ... or in the future?
         const evaluated = (try eval(alloc, ast.Node{ .expression = exp }, env)).?;
         objects[i] = evaluated;
 
@@ -370,7 +371,7 @@ fn applyFunction(
     for (function.parameters, 0..) |param, i| {
         try extended_env.set(param.value, arguments[i]);
     }
-    //
+
     // std.debug.print("applyFunction (extended)\n", .{});
     // extended_env.print();
     // std.debug.print("------\n", .{});

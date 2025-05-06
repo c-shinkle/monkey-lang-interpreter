@@ -98,6 +98,7 @@ pub const Statement = union(enum) {
 
     pub fn dupe(self: Statement, alloc: Allocator) Allocator.Error!Statement {
         return switch (self) {
+            .block_statement => |block| Statement{ .block_statement = try block.dupe(alloc) },
             inline else => |stmt| try stmt.dupe(alloc),
         };
     }
@@ -141,13 +142,13 @@ pub const LetStatement = struct {
         errdefer duped_token.dupe_deinit(alloc);
         const duped_name = try self.name.dupe(alloc);
         errdefer duped_name.dupe_deinit(alloc);
-        std.debug.assert(duped_name == .identifier);
+
         const duped_value = try self.value.dupe(alloc);
         // errdefer duped_value.dupe_deinit(alloc);
         return Statement{
             .let_statement = LetStatement{
                 .token = duped_token,
-                .name = duped_name.identifier,
+                .name = duped_name,
                 .value = duped_value,
             },
         };
@@ -265,7 +266,7 @@ pub const BlockStatement = struct {
         allocator.free(self.statements);
     }
 
-    pub fn dupe(self: *const BlockStatement, alloc: Allocator) !Statement {
+    pub fn dupe(self: *const BlockStatement, alloc: Allocator) !BlockStatement {
         const duped_token = try self.token.dupe(alloc);
         errdefer duped_token.dupe_deinit(alloc);
         var duped_array_list = std.ArrayListUnmanaged(Statement).empty;
@@ -280,11 +281,9 @@ pub const BlockStatement = struct {
             try duped_array_list.append(alloc, duped_stmt);
         }
 
-        return Statement{
-            .block_statement = BlockStatement{
-                .token = duped_token,
-                .statements = try duped_array_list.toOwnedSlice(alloc),
-            },
+        return BlockStatement{
+            .token = duped_token,
+            .statements = try duped_array_list.toOwnedSlice(alloc),
         };
     }
 
@@ -337,6 +336,7 @@ pub const Expression = union(enum) {
 
     pub fn dupe(self: Expression, alloc: Allocator) Allocator.Error!Expression {
         return switch (self) {
+            .identifier => |ident| Expression{ .identifier = try ident.dupe(alloc) },
             inline else => |exp| try exp.dupe(alloc),
         };
     }
@@ -364,13 +364,11 @@ pub const Identifier = struct {
 
     pub fn parser_deinit(_: *const Identifier, _: std.mem.Allocator) void {}
 
-    pub fn dupe(self: *const Identifier, alloc: Allocator) !Expression {
+    pub fn dupe(self: *const Identifier, alloc: Allocator) !Identifier {
         const duped_token = try self.token.dupe(alloc);
-        return Expression{
-            .identifier = Identifier{
-                .token = duped_token,
-                .value = duped_token.literal,
-            },
+        return Identifier{
+            .token = duped_token,
+            .value = duped_token.literal,
         };
     }
 
@@ -607,8 +605,7 @@ pub const IfExpression = struct {
         errdefer duped_consequence.dupe_deinit(alloc);
         const duped_consequence_ptr = try alloc.create(BlockStatement);
         errdefer alloc.destroy(duped_consequence_ptr);
-        std.debug.assert(duped_consequence == .block_statement);
-        duped_consequence_ptr.* = duped_consequence.block_statement;
+        duped_consequence_ptr.* = duped_consequence;
 
         var duped_alternative_ptr: ?*BlockStatement = null;
         if (self.alternative) |alt| {
@@ -616,8 +613,7 @@ pub const IfExpression = struct {
             errdefer duped_alt.dupe_deinit(alloc);
             duped_alternative_ptr = try alloc.create(BlockStatement);
             // errdefer alloc.destroy(duped_alternative_ptr);
-            std.debug.assert(duped_alt == .block_statement);
-            duped_alternative_ptr.?.* = duped_alt.block_statement;
+            duped_alternative_ptr.?.* = duped_alt;
         }
 
         return Expression{
@@ -690,8 +686,7 @@ pub const FunctionLiteral = struct {
         for (self.parameters) |param| {
             const duped_param = try param.dupe(alloc);
             errdefer duped_param.dupe_deinit(alloc);
-            std.debug.assert(duped_param == .identifier);
-            try duped_array_list.append(alloc, duped_param.identifier);
+            try duped_array_list.append(alloc, duped_param);
         }
         const duped_parameters = try duped_array_list.toOwnedSlice(alloc);
         errdefer {
@@ -701,13 +696,12 @@ pub const FunctionLiteral = struct {
 
         const duped_body = try self.body.dupe(alloc);
         // errdefer duped_body.dupe_deinit(alloc);
-        std.debug.assert(duped_body == .block_statement);
 
         return Expression{
             .function_literal = FunctionLiteral{
                 .token = duped_token,
                 .parameters = duped_parameters,
-                .body = duped_body.block_statement,
+                .body = duped_body,
             },
         };
     }

@@ -194,17 +194,15 @@ pub const Function = struct {
         for (self.parameters) |param| {
             const duped_param = try param.dupe(alloc);
             errdefer duped_param.dupe_deinit(alloc);
-            std.debug.assert(duped_param == .identifier);
-            try duped_parameters.append(alloc, duped_param.identifier);
+            try duped_parameters.append(alloc, duped_param);
         }
         const duped_body = try self.body.dupe(alloc);
         errdefer duped_body.dupe_deinit(alloc);
-        std.debug.assert(duped_body == .block_statement);
 
         return Object{
             .function = Function{
                 .parameters = try duped_parameters.toOwnedSlice(alloc),
-                .body = duped_body.block_statement,
+                .body = duped_body,
                 .env = self.env,
             },
         };
