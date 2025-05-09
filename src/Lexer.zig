@@ -71,6 +71,7 @@ pub fn nextToken(self: *Lexer) Token {
         '"' => Token{ .token_type = TokenType.string, .literal = self.readString() },
         '[' => Token{ .token_type = TokenType.lbracket, .literal = Token.LBRACKET },
         ']' => Token{ .token_type = TokenType.rbracket, .literal = Token.RBRACKET },
+        ':' => Token{ .token_type = TokenType.colon, .literal = Token.COLON },
         else => blk: {
             if (isLetter(ch.*)) {
                 const literal = self.readIdentifier();
@@ -152,6 +153,7 @@ test "Test Next Token" {
         \\"foobar"
         \\"foo bar"
         \\[1, 2];
+        \\{"foo": "bar"}
     ;
 
     const expecteds = [_]struct {
@@ -237,6 +239,11 @@ test "Test Next Token" {
         .{ .expected_type = TokenType.int, .expected_literal = "2" },
         .{ .expected_type = TokenType.rbracket, .expected_literal = "]" },
         .{ .expected_type = TokenType.semicolon, .expected_literal = ";" },
+        .{ .expected_type = TokenType.lbrace, .expected_literal = "{" },
+        .{ .expected_type = TokenType.string, .expected_literal = "foo" },
+        .{ .expected_type = TokenType.colon, .expected_literal = ":" },
+        .{ .expected_type = TokenType.string, .expected_literal = "bar" },
+        .{ .expected_type = TokenType.rbrace, .expected_literal = "}" },
         .{ .expected_type = TokenType.eof, .expected_literal = "" },
     };
 

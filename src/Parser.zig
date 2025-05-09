@@ -26,6 +26,7 @@ const ParserError = error{
     MissingRightBrace,
     MissingRightBracket,
     MissingRightParenthesis,
+    MissingColon,
     UnknownPrefixToken,
     UnknownOperatorToken,
 } || Allocator.Error || std.fmt.AllocPrintError || std.fmt.ParseIntError;
@@ -48,8 +49,8 @@ const Precedence = enum {
     index,
 };
 
-fn getPrecedence(_type: TokenType) Precedence {
-    return switch (_type) {
+fn getPrecedence(token_type: TokenType) Precedence {
+    return switch (token_type) {
         .eq, .not_eq => Precedence.equals,
         .lt, .gt => Precedence.lessgreater,
         .plus, .minus => Precedence.sum,
@@ -486,11 +487,11 @@ fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expre
     return try args.toOwnedSlice(alloc);
 }
 
-fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!ast.Expression {
+fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!Expression {
     return Expression{ .string_literal = ast.StringLiteral{ .token = self.cur_token } };
 }
 
-fn parseArrayLiteral(self: *Parser, alloc: Allocator) ParserError!ast.Expression {
+fn parseArrayLiteral(self: *Parser, alloc: Allocator) ParserError!Expression {
     const token = self.cur_token;
 
     const elements = try parseExpressionList(self, TokenType.rbracket, alloc);
@@ -503,8 +504,8 @@ fn parseExpressionList(
     self: *Parser,
     end: TokenType,
     alloc: Allocator,
-) ParserError![]const ast.Expression {
-    var list: std.ArrayListUnmanaged(ast.Expression) = .empty;
+) ParserError![]const Expression {
+    var list: std.ArrayListUnmanaged(Expression) = .empty;
 
     if (self.peekTokenIs(end)) {
         self.nextToken();
@@ -535,12 +536,12 @@ fn parseExpressionList(
 fn parseIndexExpression(
     self: *Parser,
     alloc: Allocator,
-    left: ast.Expression,
-) ParserError!ast.Expression {
+    left: Expression,
+) ParserError!Expression {
     const token = self.cur_token;
     self.nextToken();
 
-    const index = try alloc.create(ast.Expression);
+    const index = try alloc.create(Expression);
     errdefer alloc.destroy(index);
     index.* = try self.parseExpression(alloc, Precedence.lowest);
 
@@ -548,17 +549,47 @@ fn parseIndexExpression(
         return ParserError.MissingRightBracket;
     }
 
-    const left_ptr = try alloc.create(ast.Expression);
+    const left_ptr = try alloc.create(Expression);
     errdefer alloc.destroy(left_ptr);
     left_ptr.* = left;
 
-    return ast.Expression{
+    return Expression{
         .index_expression = ast.IndexExpression{
             .token = token,
             .index = index,
             .left = left_ptr,
         },
     };
+}
+
+fn parseHashLiteral(self: *Parser, alloc: Allocator) ParserError!Expression {
+    const token = self.cur_token;
+
+    var pairs = Expression.HashMap.empty;
+
+    while (!self.peekTokenIs(TokenType.rbrace)) {
+        self.nextToken();
+        const key = try self.parseExpression(alloc, Precedence.lowest);
+
+        if (!self.expectPeek(TokenType.colon)) {
+            return ParserError.MissingColon;
+        }
+
+        self.nextToken();
+        const value = try self.parseExpression(alloc, Precedence.lowest);
+
+        try pairs.put(alloc, key, value);
+
+        if (!self.peekTokenIs(TokenType.rbrace) and !self.expectPeek(TokenType.comma)) {
+            return ParserError.MissingRightBrace;
+        }
+    }
+
+    if (!self.expectPeek(TokenType.rbrace)) {
+        return ParserError.MissingRightBrace;
+    }
+
+    return Expression{ .hash_literal = ast.HashLiteral{ .pairs = pairs, .token = token } };
 }
 
 // Helper Methods
@@ -592,6 +623,7 @@ fn handleParserError(self: *Parser, alloc: Allocator, err: ParserError) !void {
         ParserError.MissingRightBrace,
         ParserError.MissingRightBracket,
         ParserError.MissingRightParenthesis,
+        ParserError.MissingColon,
         ParserError.UnknownOperatorToken,
         => {},
         ParserError.MissingLetAssign => {
@@ -653,6 +685,7 @@ fn lookupPrefixParseFns(token_type: TokenType) ?PrefixParseFn {
         ._function => parseFunctionLiteral,
         .string => parseStringLiteral,
         .lbracket => parseArrayLiteral,
+        .lbrace => parseHashLiteral,
         else => null,
     };
 }
@@ -1426,6 +1459,144 @@ test "Index Expression" {
 
     try testIdentifier(index_exp.left.*, "myArray");
     try testInfixExpression(index_exp.index.*, 1, Operator.plus, 1);
+}
+
+test "Hash Literals, no Keys" {
+    var arena_allocator = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    const input = "{}";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena);
+    const program = try parser.parseProgram(arena);
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+    const exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ExpressionStatement"),
+    };
+
+    try testing.expect(exp_stmt.expression == .hash_literal);
+    const hash = exp_stmt.expression.hash_literal;
+
+    try testing.expectEqual(0, hash.pairs.size);
+}
+
+test "Hash Literals, String Keys" {
+    var arena_allocator = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    const input = "{\"one\": 1, \"two\": 2, \"three\": 3}";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena);
+    const program = try parser.parseProgram(arena);
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+    const exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ExpressionStatement"),
+    };
+
+    try testing.expect(exp_stmt.expression == .hash_literal);
+    const hash = exp_stmt.expression.hash_literal;
+
+    try testing.expectEqual(3, hash.pairs.size);
+
+    var expected = std.StaticStringMap(i64).initComptime(.{
+        .{ "one", 1 },
+        .{ "two", 2 },
+        .{ "three", 3 },
+    });
+
+    var iter = hash.pairs.iterator();
+    while (iter.next()) |entry| {
+        try testing.expect(entry.key_ptr.* == .string_literal);
+        const expected_value = expected.get(entry.key_ptr.*.string_literal.token.literal) orelse
+            return error.TestExpectedEqual;
+
+        try testIntegerLiteral(entry.value_ptr.*, expected_value);
+    }
+}
+
+test "Hash Literals, Boolean Keys" {
+    var arena_allocator = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    const input = "{false: 0, true: 1}";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena);
+    const program = try parser.parseProgram(arena);
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+    const exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ExpressionStatement"),
+    };
+
+    try testing.expect(exp_stmt.expression == .hash_literal);
+    const hash = exp_stmt.expression.hash_literal;
+
+    try testing.expectEqual(2, hash.pairs.size);
+
+    var expected_map = std.AutoHashMapUnmanaged(bool, i64).empty;
+    try expected_map.put(arena, false, 0);
+    try expected_map.put(arena, true, 1);
+
+    var iter = hash.pairs.iterator();
+    while (iter.next()) |entry| {
+        try testing.expect(entry.key_ptr.* == .boolean_expression);
+
+        const expected = expected_map.get(entry.key_ptr.*.boolean_expression.value) orelse
+            return error.TestExpectedEqual;
+
+        try testing.expect(entry.value_ptr.* == .integer_literal);
+        try testing.expectEqual(expected, entry.value_ptr.*.integer_literal.value);
+    }
+}
+
+test "Hash Literals, Integer Keys" {
+    var arena_allocator = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    const input = "{1: \"one\", 2: \"two\", 3: \"three\"}";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&lexer, arena);
+    const program = try parser.parseProgram(arena);
+    try checkParserErrors(&parser);
+
+    try testing.expectEqual(1, program.statements.len);
+    const exp_stmt = switch (program.statements[0]) {
+        .expression_statement => |exp_stmt| exp_stmt,
+        else => @panic("stmts[0] is not ExpressionStatement"),
+    };
+
+    try testing.expect(exp_stmt.expression == .hash_literal);
+    const hash = exp_stmt.expression.hash_literal;
+
+    try testing.expectEqual(3, hash.pairs.size);
+
+    var expected_map = std.AutoHashMapUnmanaged(i64, []const u8).empty;
+    try expected_map.put(arena, 1, "one");
+    try expected_map.put(arena, 2, "two");
+    try expected_map.put(arena, 3, "three");
+
+    var iter = hash.pairs.iterator();
+    while (iter.next()) |entry| {
+        try testing.expect(entry.key_ptr.* == .integer_literal);
+
+        const expected = expected_map.get(entry.key_ptr.*.integer_literal.value) orelse
+            return error.TestExpectedEqual;
+
+        try testing.expect(entry.value_ptr.* == .string_literal);
+        try testing.expectEqualStrings(expected, entry.value_ptr.*.string_literal.token.literal);
+    }
 }
 
 //Test Helpers

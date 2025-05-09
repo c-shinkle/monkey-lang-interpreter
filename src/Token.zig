@@ -51,6 +51,7 @@ pub const TokenType = enum {
     string,
     lbracket,
     rbracket,
+    colon,
 
     pub fn scope(self: TokenType) Scope {
         return switch (self) {
@@ -83,6 +84,7 @@ pub const TokenType = enum {
             .rbrace,
             .lbracket,
             .rbracket,
+            .colon,
             .eof,
             // Value
             .illegal,
@@ -94,7 +96,10 @@ pub const TokenType = enum {
     }
 
     pub fn isLiteralAllocated(self: TokenType) bool {
-        return self == .illegal or self == .identifier or self == .int or self == .string;
+        return self == .illegal or
+            self == .identifier or
+            self == .int or
+            self == .string;
     }
 };
 
@@ -196,6 +201,7 @@ pub const RBRACE = "}";
 pub const LBRACKET = "[";
 pub const RBRACKET = "]";
 pub const EOF = "";
+pub const COLON = ":";
 // pub const DOUBLEQUOTES = "\"";
 
 test {

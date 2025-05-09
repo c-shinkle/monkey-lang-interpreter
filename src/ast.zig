@@ -309,6 +309,7 @@ pub const Expression = union(enum) {
     string_literal: StringLiteral,
     array_literal: ArrayLiteral,
     index_expression: IndexExpression,
+    hash_literal: HashLiteral,
 
     pub fn expressionNode(self: *const Expression) void {
         switch (self.*) {
@@ -346,6 +347,37 @@ pub const Expression = union(enum) {
             inline else => |exp| exp.dupe_deinit(alloc),
         }
     }
+
+    pub const Context = struct {
+        pub fn hash(_: Context, key: Expression) HashMap.Hash {
+            var hasher = std.hash.Fnv1a_64.init();
+            key.hash(&hasher);
+            return hasher.final();
+        }
+
+        pub fn eql(_: Context, a: Expression, b: Expression) bool {
+            return a.eql(&b);
+        }
+    };
+
+    pub const HashMap = std.HashMapUnmanaged(
+        Expression,
+        Expression,
+        Context,
+        std.hash_map.default_max_load_percentage,
+    );
+
+    pub fn hash(self: *const Expression, hasher: *std.hash.Fnv1a_64) void {
+        switch (self.*) {
+            inline else => |exp| exp.hash(hasher),
+        }
+    }
+
+    pub fn eql(self: *const Expression, other: *const Expression) bool {
+        return switch (self.*) {
+            inline else => |exp| exp.eql(other),
+        };
+    }
 };
 
 pub const Identifier = struct {
@@ -374,6 +406,18 @@ pub const Identifier = struct {
 
     pub fn dupe_deinit(self: *const Identifier, alloc: Allocator) void {
         self.token.dupe_deinit(alloc);
+    }
+
+    pub fn hash(_: *const Identifier, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const Identifier, _: *const Expression) bool {
+        unreachable;
+        // switch (other.*) {
+        //     .identifier => |ident| return std.mem.eql(u8, self.value, ident.value),
+        //     else => return false,
+        // }
     }
 };
 
@@ -405,6 +449,17 @@ pub const IntegerLiteral = struct {
 
     pub fn dupe_deinit(self: *const IntegerLiteral, alloc: Allocator) void {
         self.token.dupe_deinit(alloc);
+    }
+
+    pub fn hash(self: *const IntegerLiteral, hasher: *std.hash.Fnv1a_64) void {
+        hasher.update(std.mem.asBytes(&self.value));
+    }
+
+    pub fn eql(self: *const IntegerLiteral, other: *const Expression) bool {
+        return switch (other.*) {
+            .integer_literal => |int_lit| self.value == int_lit.value,
+            else => false,
+        };
     }
 };
 
@@ -454,6 +509,14 @@ pub const PrefixExpression = struct {
         self.token.dupe_deinit(alloc);
         self.right.dupe_deinit(alloc);
         alloc.destroy(self.right);
+    }
+
+    pub fn hash(_: *const PrefixExpression, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const PrefixExpression, _: *const Expression) bool {
+        unreachable;
     }
 };
 
@@ -522,6 +585,14 @@ pub const InfixExpression = struct {
         self.right.dupe_deinit(alloc);
         alloc.destroy(self.right);
     }
+
+    pub fn hash(_: *const InfixExpression, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const InfixExpression, _: *const Expression) bool {
+        unreachable;
+    }
 };
 
 pub const Boolean = struct {
@@ -551,6 +622,17 @@ pub const Boolean = struct {
                 .token = duped_token,
                 .value = self.value,
             },
+        };
+    }
+
+    pub fn hash(self: *const Boolean, hasher: *std.hash.Fnv1a_64) void {
+        hasher.update(std.mem.asBytes(&self.value));
+    }
+
+    pub fn eql(self: *const Boolean, other: *const Expression) bool {
+        return switch (other.*) {
+            .boolean_expression => |bool_exp| self.value == bool_exp.value,
+            else => false,
         };
     }
 };
@@ -640,6 +722,14 @@ pub const IfExpression = struct {
             alloc.destroy(alt);
         }
     }
+
+    pub fn hash(_: *const IfExpression, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const IfExpression, _: *const Expression) bool {
+        unreachable;
+    }
 };
 
 pub const FunctionLiteral = struct {
@@ -715,6 +805,14 @@ pub const FunctionLiteral = struct {
         alloc.free(self.parameters);
 
         self.body.dupe_deinit(alloc);
+    }
+
+    pub fn hash(_: *const FunctionLiteral, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const FunctionLiteral, _: *const Expression) bool {
+        unreachable;
     }
 };
 
@@ -797,6 +895,14 @@ pub const CallExpression = struct {
         }
         alloc.free(self.arguments);
     }
+
+    pub fn hash(_: *const CallExpression, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const CallExpression, _: *const Expression) bool {
+        unreachable;
+    }
 };
 
 pub const StringLiteral = struct {
@@ -821,6 +927,20 @@ pub const StringLiteral = struct {
 
     pub fn dupe_deinit(self: *const StringLiteral, alloc: Allocator) void {
         self.token.dupe_deinit(alloc);
+    }
+
+    pub fn hash(self: *const StringLiteral, hasher: *std.hash.Fnv1a_64) void {
+        hasher.update(std.mem.asBytes(&self.token.token_type));
+        hasher.update(self.token.literal);
+    }
+
+    pub fn eql(self: *const StringLiteral, other: *const Expression) bool {
+        switch (other.*) {
+            .string_literal => |str_lit| {
+                return std.mem.eql(u8, self.token.literal, str_lit.token.literal);
+            },
+            else => return false,
+        }
     }
 };
 
@@ -870,6 +990,14 @@ pub const ArrayLiteral = struct {
         for (self.elements) |element| {
             element.dupe_deinit(alloc);
         }
+    }
+
+    pub fn hash(_: *const ArrayLiteral, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const ArrayLiteral, _: *const Expression) bool {
+        unreachable;
     }
 };
 
@@ -933,6 +1061,58 @@ pub const IndexExpression = struct {
 
         self.index.dupe_deinit(alloc);
         alloc.destroy(self.index);
+    }
+
+    pub fn hash(_: *const IndexExpression, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const IndexExpression, _: *const Expression) bool {
+        unreachable;
+    }
+};
+
+pub const HashLiteral = struct {
+    token: Token,
+    pairs: Expression.HashMap,
+
+    pub fn expresionNode(_: *const HashLiteral) void {}
+
+    pub fn tokenLiteral(self: *const HashLiteral) []const u8 {
+        return self.token.literal;
+    }
+
+    pub fn string(self: *const HashLiteral, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.writeAll(Token.LBRACE);
+
+        var iter = self.pairs.iterator();
+        while (iter.next()) |entry| {
+            try entry.key_ptr.string(writer);
+            try writer.writeAll(Token.COLON);
+            try entry.value_ptr.string(writer);
+        }
+
+        try writer.writeAll(Token.RBRACE);
+    }
+
+    pub fn parser_deinit(_: *const HashLiteral, _: std.mem.Allocator) void {
+        unreachable;
+    }
+
+    pub fn dupe(_: *const HashLiteral, _: std.mem.Allocator) !Expression {
+        unreachable;
+    }
+
+    pub fn dupe_deinit(_: *const HashLiteral, _: std.mem.Allocator) void {
+        unreachable;
+    }
+
+    pub fn hash(_: *const HashLiteral, _: *std.hash.Fnv1a_64) void {
+        unreachable;
+    }
+
+    pub fn eql(_: *const HashLiteral, _: *const Expression) bool {
+        unreachable;
     }
 };
 
