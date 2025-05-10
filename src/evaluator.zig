@@ -187,7 +187,7 @@ fn evalInfixOperatorExpression(
         return try evalBooleanInfixExpression(alloc, op, left_obj.boolean, right_obj.boolean);
     } else if (left_obj == .string and right_obj == .string) {
         return try evalStringInfixExpression(alloc, op, left_obj.string, right_obj.string);
-    } else if (!left_obj.eql(right_obj)) {
+    } else if (!left_obj.eqlTag(right_obj)) {
         const args = .{ left_obj._type(), getLiteralByOperator(op), right_obj._type() };
         return try newError(alloc, "type mismatch: {s} {s} {s}", args);
     }
@@ -339,7 +339,7 @@ fn evalExpressions(
     alloc: Allocator,
     exps: []const ast.Expression,
     env: *Environment,
-) EvalError![]const obj.Object {
+) EvalError![]obj.Object {
     var objects = try alloc.alloc(obj.Object, exps.len);
 
     for (exps, 0..) |exp, i| {
@@ -1019,6 +1019,37 @@ test "Function with Builtins" {
     try testAnyObject(6, elements[2]);
     try testAnyObject(8, elements[3]);
 }
+
+// test "Hash Literals" {
+//     const input =
+//         \\let two = "two";
+//         \\{
+//         \\    "one": 10 - 9,
+//         \\    two: 1 + 1,
+//         \\    "thr" + "ee": 6 / 2,
+//         \\    4: 4,
+//         \\    true: 5;
+//         \\    false: 6
+//         \\}
+//     ;
+//     var arena = ArenaAllocator.init(testing.allocator);
+//     defer arena.deinit();
+//
+//     const maybe_actual = try testEval(input, arena.allocator());
+//     try testing.expect(maybe_actual != null);
+//     const actual = maybe_actual.?;
+//
+//     const expected = std.HashMapUnmanaged(
+//         obj.Object,
+//         i64,
+//         obj.Object.Context,
+//         std.hash_map.default_max_load_percentage,
+//     ).empty;
+//     try expected.put(arena, obj.Object{ .string = obj.String{ .value = "one" } }, 1);
+//
+//     try testing.expect(actual == .hash);
+//     // if (actual.hash
+// }
 
 // Test Helpers
 

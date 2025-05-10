@@ -25,7 +25,7 @@ pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
 pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Error!void {
     const duped_name = try self.alloc.dupe(u8, name);
     errdefer self.alloc.free(duped_name);
-    const duped_value = try value.dupe(self.alloc);
+    var duped_value = try value.dupe(self.alloc);
     errdefer duped_value.deinit(self.alloc);
 
     try self.store.put(self.alloc, duped_name, duped_value);

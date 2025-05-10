@@ -18,6 +18,7 @@ pub const FUNCTION_OBJ = "FUNCTION";
 pub const STRING_OBJ = "STRING";
 pub const BUILTIN_OBJ = "BUILTIN";
 pub const ARRAY_OBJ = "ARRAY";
+pub const DICTIONARY_OBJ = "DICTIONARY";
 
 pub const TRUE = Object{ .boolean = Boolean{ .value = true } };
 pub const FALSE = Object{ .boolean = Boolean{ .value = false } };
@@ -33,6 +34,7 @@ pub const Object = union(enum) {
     string: String,
     builtin: Builtin,
     array: Array,
+    dictionary: Dictionary,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
@@ -45,6 +47,7 @@ pub const Object = union(enum) {
             .string => STRING_OBJ,
             .builtin => BUILTIN_OBJ,
             .array => ARRAY_OBJ,
+            .dictionary => DICTIONARY_OBJ,
         };
     }
 
@@ -54,19 +57,63 @@ pub const Object = union(enum) {
         }
     }
 
-    pub fn deinit(self: Object, alloc: Allocator) void {
-        switch (self) {
-            inline else => |obj| obj.deinit(alloc),
+    pub fn deinit(self: *Object, alloc: Allocator) void {
+        switch (self.*) {
+            inline else => |*obj| obj.deinit(alloc),
         }
     }
 
-    pub fn eql(self: Object, other: Object) bool {
+    pub fn eqlTag(self: Object, other: Object) bool {
         return std.meta.activeTag(self) == std.meta.activeTag(other);
     }
 
     pub fn dupe(self: Object, alloc: Allocator) Allocator.Error!Object {
         return switch (self) {
             inline else => |obj| try obj.dupe(alloc),
+        };
+    }
+
+    pub const HashMap = std.HashMapUnmanaged(
+        Object,
+        Object,
+        struct {
+            pub fn hash(_: @This(), key: Object) HashMap.Hash {
+                return key.hash();
+            }
+
+            pub fn eql(_: @This(), a: Object, b: Object) bool {
+                return a.eql_hash(b);
+            }
+        },
+        std.hash_map.default_max_load_percentage,
+    );
+
+    pub fn hash(self: Object) HashMap.Hash {
+        var hasher = std.hash.Fnv1a_64.init();
+        switch (self) {
+            .boolean => |b| b.hash(&hasher),
+            .integer => |int| int.hash(&hasher),
+            .string => |str| str.hash(&hasher),
+            else => unreachable,
+        }
+        return hasher.final();
+    }
+
+    pub fn eql_hash(self: Object, other: Object) bool {
+        return switch (self) {
+            .boolean => |self_b| switch (other) {
+                .boolean => |other_b| self_b.value == other_b.value,
+                else => false,
+            },
+            .integer => |self_int| switch (other) {
+                .integer => |other_int| self_int.value == other_int.value,
+                else => false,
+            },
+            .string => |self_str| switch (other) {
+                .string => |other_str| std.mem.eql(u8, self_str.value, other_str.value),
+                else => false,
+            },
+            else => unreachable,
         };
     }
 };
@@ -83,6 +130,11 @@ pub const Integer = struct {
     pub fn dupe(self: Integer, _: Allocator) Allocator.Error!Object {
         return Object{ .integer = self };
     }
+
+    pub fn hash(self: *const Integer, hasher: *std.hash.Fnv1a_64) void {
+        hasher.update(std.mem.asBytes(&@intFromEnum(Object.integer)));
+        hasher.update(std.mem.asBytes(&self.value));
+    }
 };
 
 pub const Boolean = struct {
@@ -96,6 +148,11 @@ pub const Boolean = struct {
 
     pub fn dupe(self: Boolean, _: Allocator) Allocator.Error!Object {
         return Object{ .boolean = self };
+    }
+
+    pub fn hash(self: *const Boolean, hasher: *std.hash.Fnv1a_64) void {
+        hasher.update(std.mem.asBytes(&@intFromEnum(Object.boolean)));
+        hasher.update(std.mem.asBytes(&self.value));
     }
 };
 
@@ -224,6 +281,11 @@ pub const String = struct {
         const duped_value = try alloc.dupe(u8, self.value);
         return Object{ .string = String{ .value = duped_value } };
     }
+
+    pub fn hash(self: *const String, hasher: *std.hash.Fnv1a_64) void {
+        hasher.update(std.mem.asBytes(&@intFromEnum(Object.string)));
+        hasher.update(std.mem.asBytes(&self.value));
+    }
 };
 
 pub const Builtin = struct {
@@ -241,7 +303,7 @@ pub const Builtin = struct {
 };
 
 pub const Array = struct {
-    elements: []const Object,
+    elements: []Object,
 
     pub fn inspect(self: *const Array, writer: AnyWriter) AnyWriter.Error!void {
         try writer.writeByte('[');
@@ -257,12 +319,12 @@ pub const Array = struct {
         try writer.writeByte(']');
     }
 
-    pub fn deinit(array: *const Array, alloc: Allocator) void {
-        for (array.elements) |element| {
+    pub fn deinit(self: *Array, alloc: Allocator) void {
+        for (self.elements) |*element| {
             element.deinit(alloc);
         }
 
-        alloc.free(array.elements);
+        alloc.free(self.elements);
     }
 
     pub fn dupe(self: Array, alloc: Allocator) Allocator.Error!Object {
@@ -273,6 +335,47 @@ pub const Array = struct {
         }
 
         return Object{ .array = Array{ .elements = duped_elements } };
+    }
+};
+
+pub const Dictionary = struct {
+    pairs: Object.HashMap,
+
+    pub fn inspect(self: *const Dictionary, writer: AnyWriter) AnyWriter.Error!void {
+        try writer.writeByte('{');
+
+        var iter = self.pairs.iterator();
+        while (iter.next()) |entry| {
+            try entry.key_ptr.inspect(writer);
+            try writer.writeByte(':');
+            try entry.value_ptr.inspect(writer);
+            try writer.writeByte('\n');
+        }
+
+        try writer.writeByte('}');
+    }
+
+    pub fn deinit(self: *Dictionary, alloc: Allocator) void {
+        var iter = self.pairs.iterator();
+        while (iter.next()) |entry| {
+            entry.key_ptr.deinit(alloc);
+            entry.value_ptr.deinit(alloc);
+        }
+        self.pairs.deinit(alloc);
+    }
+
+    pub fn dupe(self: Dictionary, alloc: Allocator) Allocator.Error!Object {
+        var duped_pairs = Object.HashMap.empty;
+        try duped_pairs.ensureTotalCapacity(alloc, self.pairs.capacity());
+
+        var iter = self.pairs.iterator();
+        while (iter.next()) |self_entry| {
+            const duped_key = try self_entry.key_ptr.dupe(alloc);
+            const duped_value = try self_entry.value_ptr.dupe(alloc);
+            duped_pairs.putAssumeCapacity(duped_key, duped_value);
+        }
+
+        return Object{ .dictionary = Dictionary{ .pairs = duped_pairs } };
     }
 };
 
@@ -315,6 +418,42 @@ test "Object type" {
         const actual = object_test.object._type();
         try testing.expectEqualStrings(object_test.expected, actual);
     }
+}
+
+test "String hash" {
+    const hello_1 = Object{ .string = String{ .value = "Hello World" } };
+    const hello_2 = Object{ .string = String{ .value = "Hello World" } };
+
+    const diff_1 = Object{ .string = String{ .value = "My name is johnny" } };
+    const diff_2 = Object{ .string = String{ .value = "My name is johnny" } };
+
+    try testing.expect(hello_1.hash() == hello_2.hash());
+    try testing.expect(diff_1.hash() == diff_2.hash());
+    try testing.expect(hello_1.hash() != diff_1.hash());
+}
+
+test "Boolean hash" {
+    const true_1 = Object{ .boolean = Boolean{ .value = true } };
+    const true_2 = Object{ .boolean = Boolean{ .value = true } };
+
+    const false_1 = Object{ .boolean = Boolean{ .value = false } };
+    const false_2 = Object{ .boolean = Boolean{ .value = false } };
+
+    try testing.expect(true_1.hash() == true_2.hash());
+    try testing.expect(false_1.hash() == false_2.hash());
+    try testing.expect(true_1.hash() != false_1.hash());
+}
+
+test "Integer hash" {
+    const one_1 = Object{ .integer = Integer{ .value = 1 } };
+    const one_2 = Object{ .integer = Integer{ .value = 1 } };
+
+    const two_1 = Object{ .integer = Integer{ .value = 2 } };
+    const two_2 = Object{ .integer = Integer{ .value = 2 } };
+
+    try testing.expect(one_1.hash() == one_2.hash());
+    try testing.expect(two_1.hash() == two_2.hash());
+    try testing.expect(one_1.hash() != two_1.hash());
 }
 
 test {
