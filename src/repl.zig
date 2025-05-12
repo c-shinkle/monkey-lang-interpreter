@@ -10,7 +10,7 @@ const Parser = @import("Parser.zig");
 const c_imports = @cImport(@cInclude("editline/readline.h"));
 
 pub fn start(stdout: AnyWriter) !void {
-    var stdout_buffer = std.io.BufferedWriter(4096, AnyWriter){ .unbuffered_writer = stdout };
+    var stdout_buffer = std.io.bufferedWriter(stdout);
     const buffer_writer = stdout_buffer.writer().any();
 
     var env_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);

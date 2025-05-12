@@ -1,9 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-pub const BuiltinError = std.fmt.AllocPrintError;
-
 const evaluator = @import("evaluator.zig");
 const obj = @import("object.zig");
+
+pub const BuiltinError = std.fmt.AllocPrintError || obj.ObjectError;
 
 pub const BuiltinFnPointer = *const fn (
     alloc: Allocator,
@@ -16,6 +16,7 @@ pub const builtin_map = std.StaticStringMap(obj.Object).initComptime(.{
     .{ "last", obj.Object{ .builtin = obj.Builtin{ ._fn = last } } },
     .{ "rest", obj.Object{ .builtin = obj.Builtin{ ._fn = rest } } },
     .{ "push", obj.Object{ .builtin = obj.Builtin{ ._fn = push } } },
+    .{ "puts", obj.Object{ .builtin = obj.Builtin{ ._fn = puts } } },
 });
 
 fn len(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
@@ -25,9 +26,9 @@ fn len(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
     return switch (args[0]) {
         .string => |str| obj.Object{ .integer = obj.Integer{ .value = @intCast(str.value.len) } },
         .array => |arr| obj.Object{ .integer = obj.Integer{ .value = @intCast(arr.elements.len) } },
-        else => blk: {
+        else => new_error: {
             const fmt = "argument to 'len' not supported, got {s}";
-            break :blk try evaluator.newError(alloc, fmt, .{args[0]._type()});
+            break :new_error try evaluator.newError(alloc, fmt, .{args[0]._type()});
         },
     };
 }
@@ -107,6 +108,18 @@ fn push(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
     next_elements[original_elements.len] = args[1];
 
     return obj.Object{ .array = obj.Array{ .elements = next_elements } };
+}
+
+fn puts(_: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
+    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer().any());
+    defer stdout_buffer.flush() catch std.debug.print("Failed to flush stdout_buffer!\n", .{});
+    const buffer_writer = stdout_buffer.writer().any();
+
+    for (args) |arg| {
+        try arg.inspect(buffer_writer);
+        try buffer_writer.writeByte('\n');
+    }
+    return obj.NULL;
 }
 
 test {

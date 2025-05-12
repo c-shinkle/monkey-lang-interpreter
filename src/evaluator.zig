@@ -41,7 +41,7 @@ pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalErro
             },
             .array_literal => |array_lit| try evalArrayLiteral(alloc, array_lit, env),
             .index_expression => |index_exp| try evalIndexExpression(alloc, index_exp, env),
-            .hash_literal => unreachable,
+            .hash_literal => |hash_lit| try evalHashLiteral(alloc, hash_lit, env),
         },
     };
 }
@@ -412,30 +412,72 @@ fn evalIndexExpression(
     env: *Environment,
 ) EvalError!?obj.Object {
     const left_node = ast.Node{ .expression = index_exp.left.* };
-    const left_eval = try eval(alloc, left_node, env);
-    if (isError(left_eval)) {
-        return left_eval;
+    const maybe_left_eval = try eval(alloc, left_node, env);
+    if (isError(maybe_left_eval)) {
+        return maybe_left_eval;
     }
+    const left_eval = maybe_left_eval.?;
 
     const index_node = ast.Node{ .expression = index_exp.index.* };
-    const index_eval = try eval(alloc, index_node, env);
-    if (isError(index_eval)) {
-        return index_eval;
+    const maybe_index_eval = try eval(alloc, index_node, env);
+    if (isError(maybe_index_eval)) {
+        return maybe_index_eval;
     }
+    const index_eval = maybe_index_eval.?;
 
-    if (left_eval.? == .array and index_eval.? == .integer) {
-        const index_value = index_eval.?.integer.value;
-        const elements = left_eval.?.array.elements;
+    if (left_eval == .array and index_eval == .integer) {
+        const index_value = index_eval.integer.value;
+        const elements = left_eval.array.elements;
 
         if (index_value < 0 or index_value >= elements.len) {
             return obj.NULL;
         }
 
         return elements[@intCast(index_value)];
-    } else {
-        const fmt = "index operator not supported: {s}";
-        return try newError(alloc, fmt, .{left_eval.?._type()});
     }
+
+    if (left_eval == .dictionary) {
+        return switch (index_eval) {
+            .string, .boolean, .integer => val: {
+                // std.debug.print("Get key hash: {d}\n", .{index_eval.hash()});
+                break :val left_eval.dictionary.pairs.get(index_eval) orelse obj.NULL;
+            },
+            else => try newError(alloc, "unusable as hash key: {s}", .{index_eval._type()}),
+        };
+    }
+
+    const fmt = "index operator not supported: {s}";
+    return try newError(alloc, fmt, .{maybe_left_eval.?._type()});
+}
+
+fn evalHashLiteral(
+    alloc: Allocator,
+    hash_lit: ast.HashLiteral,
+    env: *Environment,
+) EvalError!?obj.Object {
+    var pairs = obj.Object.HashMap(obj.Object).empty;
+
+    var iter = hash_lit.pairs.iterator();
+    while (iter.next()) |entry| {
+        const key_node = ast.Node{ .expression = entry.key_ptr.* };
+        const maybe_key = try eval(alloc, key_node, env);
+        if (isError(maybe_key)) {
+            return maybe_key;
+        }
+        const key = maybe_key.?;
+
+        const value_node = ast.Node{ .expression = entry.value_ptr.* };
+        const maybe_value = try eval(alloc, value_node, env);
+        if (isError(maybe_value)) {
+            return maybe_value;
+        }
+        const value = maybe_value.?;
+
+        // std.debug.print("Put key hash: {d}\n", .{key.hash()});
+        try pairs.put(alloc, key, value);
+    }
+
+    return obj.Object{ .dictionary = obj.Dictionary{ .pairs = pairs } };
 }
 
 // Test Suite
@@ -742,6 +784,10 @@ test "Error Handling" {
             .input = "\"Hello\" - \"World\"",
             .expected = "unknown operator: STRING - STRING",
         },
+        .{
+            .input = "{\"name\": \"Monkey\"}[fn(x) { x }];",
+            .expected = "unusable as hash key: FUNCTION",
+        },
     };
 
     for (eval_tests) |eval_test| {
@@ -1020,36 +1066,53 @@ test "Function with Builtins" {
     try testAnyObject(8, elements[3]);
 }
 
-// test "Hash Literals" {
-//     const input =
-//         \\let two = "two";
-//         \\{
-//         \\    "one": 10 - 9,
-//         \\    two: 1 + 1,
-//         \\    "thr" + "ee": 6 / 2,
-//         \\    4: 4,
-//         \\    true: 5;
-//         \\    false: 6
-//         \\}
-//     ;
-//     var arena = ArenaAllocator.init(testing.allocator);
-//     defer arena.deinit();
-//
-//     const maybe_actual = try testEval(input, arena.allocator());
-//     try testing.expect(maybe_actual != null);
-//     const actual = maybe_actual.?;
-//
-//     const expected = std.HashMapUnmanaged(
-//         obj.Object,
-//         i64,
-//         obj.Object.Context,
-//         std.hash_map.default_max_load_percentage,
-//     ).empty;
-//     try expected.put(arena, obj.Object{ .string = obj.String{ .value = "one" } }, 1);
-//
-//     try testing.expect(actual == .hash);
-//     // if (actual.hash
-// }
+test "Hash Literals" {
+    const input =
+        \\let two = "two";
+        \\{
+        \\    "one": 10 - 9,
+        \\    two: 1 + 1,
+        \\    "thr" + "ee": 6 / 2,
+        \\    4: 4,
+        \\    true: 5,
+        \\    false: 6,
+        \\}
+    ;
+    var arena_allocator = ArenaAllocator.init(testing.allocator);
+    defer arena_allocator.deinit();
+
+    const maybe_actual = try testEval(input, arena_allocator.allocator());
+    try testing.expect(maybe_actual != null);
+    const actual = maybe_actual.?;
+
+    var expected = obj.Object.HashMap(i64).empty;
+    try expected.put(
+        arena_allocator.allocator(),
+        obj.Object{ .string = obj.String{ .value = "one" } },
+        1,
+    );
+
+    try testing.expect(actual == .dictionary);
+}
+
+test "Hash Index Expressions" {
+    const hash_tests = [_]struct { input: []const u8, expected: ?i64 }{
+        .{ .input = "{\"foo\": 5}[\"foo\"]", .expected = 5 },
+        .{ .input = "{\"foo\": 5}[\"bar\"]", .expected = null },
+        .{ .input = "let key = \"foo\"; {\"foo\": 5}[key]", .expected = 5 },
+        .{ .input = "{}[\"foo\"]", .expected = null },
+        .{ .input = "{5: 5}[5]", .expected = 5 },
+        .{ .input = "{true: 5}[true]", .expected = 5 },
+        .{ .input = "{false: 5}[false]", .expected = 5 },
+    };
+
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    for (hash_tests) |hash_test| {
+        const maybe_actual = try testEval(hash_test.input, arena.allocator());
+        try testAnyObject(hash_test.expected, maybe_actual);
+    }
+}
 
 // Test Helpers
 

@@ -9,6 +9,8 @@ const Environment = @import("Environment.zig");
 
 const ObjectType = []const u8;
 
+pub const ObjectError = AnyWriter.Error;
+
 pub const INTEGER_OBJ = "INTEGER";
 pub const BOOLEAN_OBJ = "BOOLEAN";
 pub const NULL_OBJ = "NULL";
@@ -51,7 +53,7 @@ pub const Object = union(enum) {
         };
     }
 
-    pub fn inspect(self: Object, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: Object, writer: AnyWriter) ObjectError!void {
         switch (self) {
             inline else => |obj| try obj.inspect(writer),
         }
@@ -73,26 +75,28 @@ pub const Object = union(enum) {
         };
     }
 
-    pub const HashMap = std.HashMapUnmanaged(
-        Object,
-        Object,
-        struct {
-            pub fn hash(_: @This(), key: Object) HashMap.Hash {
-                return key.hash();
-            }
+    pub fn HashMap(comptime V: type) type {
+        return std.HashMapUnmanaged(
+            Object,
+            V,
+            struct {
+                pub fn hash(_: @This(), key: Object) HashMap(Object).Hash {
+                    return key.hash();
+                }
 
-            pub fn eql(_: @This(), a: Object, b: Object) bool {
-                return a.eql_hash(b);
-            }
-        },
-        std.hash_map.default_max_load_percentage,
-    );
+                pub fn eql(_: @This(), a: Object, b: Object) bool {
+                    return a.eql_hash(b);
+                }
+            },
+            std.hash_map.default_max_load_percentage,
+        );
+    }
 
-    pub fn hash(self: Object) HashMap.Hash {
+    pub fn hash(self: Object) HashMap(Object).Hash {
         var hasher = std.hash.Fnv1a_64.init();
         switch (self) {
-            .boolean => |b| b.hash(&hasher),
             .integer => |int| int.hash(&hasher),
+            .boolean => |b| b.hash(&hasher),
             .string => |str| str.hash(&hasher),
             else => unreachable,
         }
@@ -101,18 +105,9 @@ pub const Object = union(enum) {
 
     pub fn eql_hash(self: Object, other: Object) bool {
         return switch (self) {
-            .boolean => |self_b| switch (other) {
-                .boolean => |other_b| self_b.value == other_b.value,
-                else => false,
-            },
-            .integer => |self_int| switch (other) {
-                .integer => |other_int| self_int.value == other_int.value,
-                else => false,
-            },
-            .string => |self_str| switch (other) {
-                .string => |other_str| std.mem.eql(u8, self_str.value, other_str.value),
-                else => false,
-            },
+            .integer => |self_int| self_int.eql_hash(other),
+            .boolean => |self_b| self_b.eql_hash(other),
+            .string => |self_str| self_str.eql_hash(other),
             else => unreachable,
         };
     }
@@ -121,7 +116,7 @@ pub const Object = union(enum) {
 pub const Integer = struct {
     value: i64,
 
-    pub fn inspect(self: *const Integer, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Integer, writer: AnyWriter) ObjectError!void {
         return try writer.print("{d}", .{self.value});
     }
 
@@ -132,15 +127,22 @@ pub const Integer = struct {
     }
 
     pub fn hash(self: *const Integer, hasher: *std.hash.Fnv1a_64) void {
-        hasher.update(std.mem.asBytes(&@intFromEnum(Object.integer)));
+        hasher.update(std.mem.asBytes(&Object.integer));
         hasher.update(std.mem.asBytes(&self.value));
+    }
+
+    pub fn eql_hash(self: Integer, other: Object) bool {
+        return switch (other) {
+            .integer => |int| self.value == int.value,
+            else => false,
+        };
     }
 };
 
 pub const Boolean = struct {
     value: bool,
 
-    pub fn inspect(self: *const Boolean, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Boolean, writer: AnyWriter) ObjectError!void {
         try writer.print("{any}", .{self.value});
     }
 
@@ -154,10 +156,17 @@ pub const Boolean = struct {
         hasher.update(std.mem.asBytes(&@intFromEnum(Object.boolean)));
         hasher.update(std.mem.asBytes(&self.value));
     }
+
+    pub fn eql_hash(self: Boolean, other: Object) bool {
+        return switch (other) {
+            .boolean => |b| self.value == b.value,
+            else => false,
+        };
+    }
 };
 
 pub const Null = struct {
-    pub fn inspect(_: *const Null, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(_: *const Null, writer: AnyWriter) ObjectError!void {
         try writer.print("null", .{});
     }
 
@@ -171,7 +180,7 @@ pub const Null = struct {
 pub const ReturnValue = struct {
     value: ?*Object,
 
-    pub fn inspect(self: *const ReturnValue, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const ReturnValue, writer: AnyWriter) ObjectError!void {
         if (self.value) |value| try value.inspect(writer) else try writer.writeAll("null");
     }
 
@@ -196,7 +205,7 @@ pub const ReturnValue = struct {
 pub const Error = struct {
     message: []const u8,
 
-    pub fn inspect(self: *const Error, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Error, writer: AnyWriter) ObjectError!void {
         try writer.print("ERROR: {s}", .{self.message});
     }
 
@@ -214,7 +223,7 @@ pub const Function = struct {
     body: ast.BlockStatement,
     env: *Environment,
 
-    pub fn inspect(self: *const Function, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Function, writer: AnyWriter) ObjectError!void {
         try writer.writeAll("fn(");
 
         if (self.parameters.len > 0) {
@@ -269,7 +278,7 @@ pub const Function = struct {
 pub const String = struct {
     value: []const u8,
 
-    pub fn inspect(self: *const String, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const String, writer: AnyWriter) ObjectError!void {
         return try writer.print("{s}", .{self.value});
     }
 
@@ -284,14 +293,21 @@ pub const String = struct {
 
     pub fn hash(self: *const String, hasher: *std.hash.Fnv1a_64) void {
         hasher.update(std.mem.asBytes(&@intFromEnum(Object.string)));
-        hasher.update(std.mem.asBytes(&self.value));
+        hasher.update(self.value);
+    }
+
+    pub fn eql_hash(self: String, other: Object) bool {
+        return switch (other) {
+            .string => |str| std.mem.eql(u8, self.value, str.value),
+            else => false,
+        };
     }
 };
 
 pub const Builtin = struct {
     _fn: builtins.BuiltinFnPointer,
 
-    pub fn inspect(_: *const Builtin, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(_: *const Builtin, writer: AnyWriter) ObjectError!void {
         return try writer.writeAll("builtin function");
     }
 
@@ -305,7 +321,7 @@ pub const Builtin = struct {
 pub const Array = struct {
     elements: []Object,
 
-    pub fn inspect(self: *const Array, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Array, writer: AnyWriter) ObjectError!void {
         try writer.writeByte('[');
 
         if (self.elements.len > 0) {
@@ -339,17 +355,23 @@ pub const Array = struct {
 };
 
 pub const Dictionary = struct {
-    pairs: Object.HashMap,
+    pairs: Object.HashMap(Object),
 
-    pub fn inspect(self: *const Dictionary, writer: AnyWriter) AnyWriter.Error!void {
+    pub fn inspect(self: *const Dictionary, writer: AnyWriter) ObjectError!void {
         try writer.writeByte('{');
 
         var iter = self.pairs.iterator();
-        while (iter.next()) |entry| {
+        if (iter.next()) |entry| {
             try entry.key_ptr.inspect(writer);
             try writer.writeByte(':');
             try entry.value_ptr.inspect(writer);
-            try writer.writeByte('\n');
+        }
+
+        while (iter.next()) |entry| {
+            try writer.writeAll(", ");
+            try entry.key_ptr.inspect(writer);
+            try writer.writeByte(':');
+            try entry.value_ptr.inspect(writer);
         }
 
         try writer.writeByte('}');
@@ -365,7 +387,7 @@ pub const Dictionary = struct {
     }
 
     pub fn dupe(self: Dictionary, alloc: Allocator) Allocator.Error!Object {
-        var duped_pairs = Object.HashMap.empty;
+        var duped_pairs = Object.HashMap(Object).empty;
         try duped_pairs.ensureTotalCapacity(alloc, self.pairs.capacity());
 
         var iter = self.pairs.iterator();
