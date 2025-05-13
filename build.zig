@@ -15,7 +15,13 @@ pub fn build(b: *std.Build) void {
     compile_unit_tests(b, "object", target, optimize, test_step);
     compile_unit_tests(b, "evaluator", target, optimize, test_step);
 
-    const editline_dep = b.dependency("editline", .{ .target = target, .optimize = optimize });
+    const options = b.addOptions();
+    const enable_readline = b.option(
+        bool,
+        "enable_readline",
+        "Should build link against readline",
+    ) orelse false;
+    options.addOption(bool, "enable_readline", enable_readline);
 
     const exe = b.addExecutable(.{
         .name = "monkey-lang",
@@ -24,10 +30,14 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .link_libc = true,
+            .link_libc = enable_readline,
         }),
     });
-    exe.linkLibrary(editline_dep.artifact("editline"));
+    if (enable_readline) {
+        exe.linkSystemLibrary("readline");
+    }
+    exe.root_module.addOptions("build_config", options);
+
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -51,7 +61,6 @@ fn compile_unit_tests(
             .root_source_file = b.path(std.fmt.comptimePrint("src/{s}.zig", .{name})),
             .target = target,
             .optimize = optimize,
-            .link_libc = true,
         }),
     });
 
