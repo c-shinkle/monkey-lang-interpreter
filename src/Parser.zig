@@ -90,20 +90,9 @@ pub fn deinit(self: *Parser, alloc: Allocator) void {
 
 pub fn parseProgram(self: *Parser, alloc: Allocator) ParserError!ast.Program {
     var list = std.ArrayListUnmanaged(ast.Statement).empty;
-    errdefer {
-        for (list.items) |stmt| {
-            stmt.parser_deinit(alloc);
-        }
-        list.deinit(alloc);
-    }
 
     while (self.cur_token.token_type != .eof) {
         const maybe_stmt = self.parseStatement(alloc);
-        errdefer {
-            if (maybe_stmt) |stmt| {
-                stmt.parser_deinit(alloc);
-            } else |_| {}
-        }
 
         if (maybe_stmt) |stmt| {
             try list.append(alloc, stmt);
@@ -191,19 +180,12 @@ pub fn parseExpressionStatement(
 pub fn parseBlockStatement(self: *Parser, alloc: Allocator) ParserError!ast.BlockStatement {
     const token = self.cur_token;
     var statements = std.ArrayListUnmanaged(ast.Statement).empty;
-    errdefer {
-        for (statements.items) |stmt| {
-            stmt.parser_deinit(alloc);
-        }
-        statements.deinit(alloc);
-    }
     self.nextToken();
 
     while (!self.curTokenIs(.rbrace) and
         !self.curTokenIs(.eof)) : (self.nextToken())
     {
         const statement = try self.parseStatement(alloc);
-        errdefer statement.parser_deinit(alloc);
         try statements.append(alloc, statement);
     }
 
@@ -230,8 +212,6 @@ pub fn parseExpression(
     while (!self.peekTokenIs(.semicolon) and
         precedence_int < @intFromEnum(self.peekPrecedence()))
     {
-        errdefer left_exp.parser_deinit(alloc);
-
         const infix = lookupInfixParseFns(self.peek_token.token_type) orelse return left_exp;
         self.nextToken();
         left_exp = try infix(self, alloc, left_exp);
@@ -336,9 +316,7 @@ fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
     self.nextToken();
 
     const condition = try alloc.create(Expression);
-    errdefer alloc.destroy(condition);
     condition.* = try self.parseExpression(alloc, Precedence.lowest);
-    errdefer condition.parser_deinit(alloc);
 
     if (!self.expectPeek(.rparen)) {
         return ParserError.MissingRightParenthesis;
@@ -348,9 +326,7 @@ fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
     }
 
     const consequence = try alloc.create(ast.BlockStatement);
-    errdefer alloc.destroy(consequence);
     consequence.* = try self.parseBlockStatement(alloc);
-    errdefer consequence.parser_deinit(alloc);
 
     var maybe_alt: ?*ast.BlockStatement = null;
     if (self.peekTokenIs(._else)) {
@@ -360,9 +336,7 @@ fn parseIfExpression(self: *Parser, alloc: Allocator) ParserError!Expression {
             return ParserError.MissingLeftBrace;
         }
         maybe_alt = try alloc.create(ast.BlockStatement);
-        errdefer alloc.destroy(maybe_alt.?);
         maybe_alt.?.* = try self.parseBlockStatement(alloc);
-        // errdefer maybe_alt.?.parser_deinit(alloc);
     }
 
     return Expression{
@@ -454,12 +428,6 @@ fn parseCallExpression(
 
 fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expression {
     var args = std.ArrayListUnmanaged(Expression).empty;
-    errdefer {
-        if (args.items.len > 0) for (args.items[1..]) |arg| {
-            arg.parser_deinit(alloc);
-        };
-        args.deinit(alloc);
-    }
 
     if (self.peekTokenIs(.rparen)) {
         self.nextToken();
@@ -469,14 +437,12 @@ fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expre
     self.nextToken();
 
     const first_exp = try self.parseExpression(alloc, Precedence.lowest);
-    errdefer first_exp.parser_deinit(alloc);
     try args.append(alloc, first_exp);
 
     while (self.peekTokenIs(.comma)) {
         self.nextToken();
         self.nextToken();
         const loop_exp = try self.parseExpression(alloc, Precedence.lowest);
-        errdefer loop_exp.parser_deinit(alloc);
         try args.append(alloc, loop_exp);
     }
 
@@ -514,7 +480,6 @@ fn parseExpressionList(
 
     self.nextToken();
     const first = try self.parseExpression(alloc, Precedence.lowest);
-    // errdefer first.parser_deinit(alloc);
     try list.append(alloc, first);
 
     while (self.peekTokenIs(TokenType.comma)) {
@@ -522,7 +487,6 @@ fn parseExpressionList(
         self.nextToken();
 
         const next = try self.parseExpression(alloc, Precedence.lowest);
-        // errdefer next.parser_deinit(alloc);
         try list.append(alloc, next);
     }
 
@@ -700,61 +664,6 @@ fn lookupInfixParseFns(token_type: TokenType) ?InfixParseFn {
 }
 
 // Test Suite
-
-test "Out of Memory, no Parser errors" {
-    const inputs = [_][]const u8{
-        "let x = 5;",
-        "let x = 2 + 3;",
-        "let x = (2 + 3) * 1;",
-        "foobar;",
-        "return x;",
-        "5;",
-        "!5;",
-        "-5;",
-        "!true;",
-        "!false;",
-        "5 + 5;",
-        "5 == 5;",
-        "5 != 5;",
-        "true == true;",
-        "true != false;",
-        "if (x < y) { 1 } else { (2 + 3) * 4 };",
-        "if (x < y) { (1 + 2) * 3 } else { 4 };",
-        "fn(x, y) { x + y };",
-        "fn(x, y) { (1 + 2) * 3 };",
-        "add(1);",
-        "add((1 + 2) * 3);",
-        "add(1, (2 + 3) * 4);",
-    };
-    for (inputs) |input| {
-        try testing.checkAllAllocationFailures(
-            testing.allocator,
-            testOutOfMemory,
-            .{input},
-        );
-    }
-}
-
-test "Out of Memory, with Parser errors" {
-    const input =
-        \\let x 5;
-        \\let = 10;
-        \\let 838383
-    ;
-
-    const expecteds = [_][]const u8{
-        "expected next token to be TokenType.assign, got TokenType.int instead",
-        "expected next token to be TokenType.identifier, got TokenType.assign instead",
-        "no prefix parse function for Token.TokenType.assign found",
-        "expected next token to be TokenType.identifier, got TokenType.int instead",
-    };
-
-    try testing.checkAllAllocationFailures(
-        testing.allocator,
-        testOutOfMemoryWithParserErrors,
-        .{ input, &expecteds },
-    );
-}
 
 test "Let Statement" {
     const let_tests = .{
@@ -1122,14 +1031,14 @@ test "Operator Precedence" {
             .input = "add(a + b + c * d / f + g)",
             .expected = "add((((a + b) + ((c * d) / f)) + g))",
         },
-        // .{
-        //     .input = "a * [1, 2, 3, 4][b * c] *d",
-        //     .expected = "((a * ([1, 2, 3, 4][(b * c)])) * d)",
-        // },
-        // .{
-        //     .input = "(a * b[2], b[1], 2 * [1, 2][1])",
-        //     .expected = "((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
-        // },
+        .{
+            .input = "a * [1, 2, 3, 4][b * c] *d",
+            .expected = "((a * ([1, 2, 3, 4][(b * c)])) * d)",
+        },
+        .{
+            .input = "add(a * b[2], b[1], 2 * [1, 2][1])",
+            .expected = "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
+        },
     };
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);

@@ -14,12 +14,6 @@ pub fn dupe(self: Token, alloc: Allocator) Allocator.Error!Token {
     return Token{ .token_type = self.token_type, .literal = literal };
 }
 
-pub fn dupe_deinit(self: Token, alloc: Allocator) void {
-    if (self.token_type.isLiteralAllocated()) {
-        alloc.free(self.literal);
-    }
-}
-
 pub const TokenType = enum {
     assign,
     plus,

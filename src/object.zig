@@ -59,12 +59,6 @@ pub const Object = union(enum) {
         }
     }
 
-    pub fn deinit(self: *Object, alloc: Allocator) void {
-        switch (self.*) {
-            inline else => |*obj| obj.deinit(alloc),
-        }
-    }
-
     pub fn eqlTag(self: Object, other: Object) bool {
         return std.meta.activeTag(self) == std.meta.activeTag(other);
     }
@@ -120,8 +114,6 @@ pub const Integer = struct {
         return try writer.print("{d}", .{self.value});
     }
 
-    pub fn deinit(_: *const Integer, _: Allocator) void {}
-
     pub fn dupe(self: Integer, _: Allocator) Allocator.Error!Object {
         return Object{ .integer = self };
     }
@@ -146,8 +138,6 @@ pub const Boolean = struct {
         try writer.print("{any}", .{self.value});
     }
 
-    pub fn deinit(_: *const Boolean, _: Allocator) void {}
-
     pub fn dupe(self: Boolean, _: Allocator) Allocator.Error!Object {
         return Object{ .boolean = self };
     }
@@ -170,8 +160,6 @@ pub const Null = struct {
         try writer.print("null", .{});
     }
 
-    pub fn deinit(_: *const Null, _: Allocator) void {}
-
     pub fn dupe(self: Null, _: Allocator) Allocator.Error!Object {
         return Object{ ._null = self };
     }
@@ -182,13 +170,6 @@ pub const ReturnValue = struct {
 
     pub fn inspect(self: *const ReturnValue, writer: AnyWriter) ObjectError!void {
         if (self.value) |value| try value.inspect(writer) else try writer.writeAll("null");
-    }
-
-    pub fn deinit(self: *const ReturnValue, alloc: Allocator) void {
-        if (self.value) |value| {
-            value.deinit(alloc);
-            alloc.destroy(value);
-        }
     }
 
     pub fn dupe(self: ReturnValue, alloc: Allocator) Allocator.Error!Object {
@@ -207,10 +188,6 @@ pub const Error = struct {
 
     pub fn inspect(self: *const Error, writer: AnyWriter) ObjectError!void {
         try writer.print("ERROR: {s}", .{self.message});
-    }
-
-    pub fn deinit(self: *const Error, alloc: Allocator) void {
-        alloc.free(self.message);
     }
 
     pub fn dupe(self: Error, alloc: Allocator) Allocator.Error!Object {
@@ -240,30 +217,13 @@ pub const Function = struct {
         try writer.writeByte('\n');
     }
 
-    pub fn deinit(self: *const Function, alloc: Allocator) void {
-        for (self.parameters) |param| {
-            param.dupe_deinit(alloc);
-        }
-        alloc.free(self.parameters);
-
-        self.body.dupe_deinit(alloc);
-    }
-
     pub fn dupe(self: Function, alloc: Allocator) Allocator.Error!Object {
         var duped_parameters = std.ArrayListUnmanaged(ast.Identifier).empty;
-        errdefer {
-            for (duped_parameters.items) |item| {
-                item.dupe_deinit(alloc);
-            }
-            duped_parameters.deinit(alloc);
-        }
         for (self.parameters) |param| {
             const duped_param = try param.dupe(alloc);
-            errdefer duped_param.dupe_deinit(alloc);
             try duped_parameters.append(alloc, duped_param);
         }
         const duped_body = try self.body.dupe(alloc);
-        errdefer duped_body.dupe_deinit(alloc);
 
         return Object{
             .function = Function{
@@ -280,10 +240,6 @@ pub const String = struct {
 
     pub fn inspect(self: *const String, writer: AnyWriter) ObjectError!void {
         return try writer.print("{s}", .{self.value});
-    }
-
-    pub fn deinit(self: *const String, alloc: Allocator) void {
-        alloc.free(self.value);
     }
 
     pub fn dupe(self: String, alloc: Allocator) Allocator.Error!Object {
@@ -311,8 +267,6 @@ pub const Builtin = struct {
         return try writer.writeAll("builtin function");
     }
 
-    pub fn deinit(_: *const Builtin, _: Allocator) void {}
-
     pub fn dupe(self: Builtin, _: Allocator) Allocator.Error!Object {
         return Object{ .builtin = self };
     }
@@ -333,14 +287,6 @@ pub const Array = struct {
         }
 
         try writer.writeByte(']');
-    }
-
-    pub fn deinit(self: *Array, alloc: Allocator) void {
-        for (self.elements) |*element| {
-            element.deinit(alloc);
-        }
-
-        alloc.free(self.elements);
     }
 
     pub fn dupe(self: Array, alloc: Allocator) Allocator.Error!Object {
@@ -375,15 +321,6 @@ pub const Dictionary = struct {
         }
 
         try writer.writeByte('}');
-    }
-
-    pub fn deinit(self: *Dictionary, alloc: Allocator) void {
-        var iter = self.pairs.iterator();
-        while (iter.next()) |entry| {
-            entry.key_ptr.deinit(alloc);
-            entry.value_ptr.deinit(alloc);
-        }
-        self.pairs.deinit(alloc);
     }
 
     pub fn dupe(self: Dictionary, alloc: Allocator) Allocator.Error!Object {

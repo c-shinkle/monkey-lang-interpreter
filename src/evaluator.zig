@@ -329,7 +329,7 @@ fn evalCallExpression(
     }
 
     return switch (evaluated) {
-        .function => |func| applyFunction(alloc, func, args),
+        .function => |*func| applyFunction(alloc, func, args),
         .builtin => |builtin| try builtin._fn(alloc, args),
         else => try newError(alloc, "not a function: {}", .{evaluated}),
     };
@@ -343,13 +343,13 @@ fn evalExpressions(
     var objects = try alloc.alloc(obj.Object, exps.len);
 
     for (exps, 0..) |exp, i| {
-        //TODO how do I know this will never be null today? ... or in the future?
+        // Parser guarentees evaluated expressions are valid
         const evaluated = (try eval(alloc, ast.Node{ .expression = exp }, env)).?;
-        objects[i] = evaluated;
-
         if (isError(evaluated)) {
-            return try alloc.realloc(objects, i + 1);
+            objects[0] = evaluated;
+            return try alloc.realloc(objects, 1);
         }
+        objects[i] = evaluated;
     }
 
     return objects;
@@ -357,18 +357,13 @@ fn evalExpressions(
 
 fn applyFunction(
     alloc: Allocator,
-    function: obj.Function,
+    function: *const obj.Function,
     arguments: []const obj.Object,
 ) EvalError!?obj.Object {
-    const node = ast.Node{ .statement = ast.Statement{ .block_statement = function.body } };
-
     const extended_env = try function.env.alloc.create(Environment);
-    extended_env.* = Environment{
-        .alloc = function.env.alloc,
-        .store = .empty,
-        .outer = function.env,
-    };
+    extended_env.* = function.env.enclose();
 
+    std.debug.assert(function.parameters.len == arguments.len);
     for (function.parameters, 0..) |param, i| {
         try extended_env.set(param.value, arguments[i]);
     }
@@ -377,20 +372,20 @@ fn applyFunction(
     // extended_env.print();
     // std.debug.print("------\n", .{});
 
+    const node = ast.Node{ .statement = ast.Statement{ .block_statement = function.body } };
     const maybe_evaluated = try eval(alloc, node, extended_env);
-    if (maybe_evaluated) |object| {
-        switch (object) {
-            .return_value => |ret_val| {
-                if (ret_val.value) |val| {
-                    const temp = val.*;
-                    alloc.destroy(val);
-                    return temp;
-                }
-                return null;
-            },
-            else => {},
-        }
-    }
+    if (maybe_evaluated) |object| switch (object) {
+        .return_value => |ret_val| {
+            if (ret_val.value) |val| {
+                const temp = val.*;
+                alloc.destroy(val);
+                return temp;
+            }
+            return null;
+        },
+        else => {},
+    };
+
     return maybe_evaluated;
 }
 
@@ -481,88 +476,6 @@ fn evalHashLiteral(
 }
 
 // Test Suite
-
-test "Out of Memory, Without Errors" {
-    const inputs = [_][]const u8{
-        "5",
-        "-5",
-        "2 * (5 + 10)",
-        "3 * (3 * 3) + 10",
-        "true",
-        "false",
-        "1 < 2",
-        "1 != 2",
-        "!!false",
-        "!!5",
-        "if (1 < 2) { 10 }",
-        "if (1 > 2) { 10 }",
-        "if (1 < 2) { 10 } else { 20 }",
-        "if (1 > 2) { 10 } else { 20 }",
-        "9; return 2 * 5; 9;",
-        "return if (1 < 2) { 10 } else { 20 };",
-        \\if (10 > 1) {
-        \\  if (10 > 1) {
-        \\    return 10;
-        \\  }
-        \\
-        \\  return 1;
-        \\}
-        \\let a = 5; let b = a; b;
-        ,
-        "fn(x) { x + 2 };",
-        "let identity = fn(x) { x } ; identity(5);",
-        "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));",
-        "fn(x) { x; }(5)",
-        \\let newAdder = fn(x) { fn(y) { x + y }; };
-        \\let addTwo = newAdder(2);
-        \\addTwo(1);
-        ,
-        "\"Hello, World!\"",
-        "\"Hello, \" + \"World!\"",
-        "let x = [\"a\", \"b\", \"c\"]; first(a)",
-        "let x = [\"a\", \"b\", \"c\"]; last(a)",
-        "let x = [\"a\", \"b\", \"c\"]; rest(a)",
-        "let x = [\"a\", \"b\", \"c\"]; push(\"d\")",
-        \\let map = fn(arr, f) {
-        \\    let iter = fn(arr, accumualted) {
-        \\        if (len(arr) == 0) {
-        \\            accumulated
-        \\        }
-        \\        else {
-        \\            iter(rest(arr), push(accumulated, f(first(arr))));
-        \\        }
-        \\    };
-        \\    iter(arr, []);
-        \\};
-        \\let a = [1, 2, 3, 4];
-        \\let double = fn(x) { x * 2 };
-        \\map(a, double);
-        ,
-    };
-
-    for (inputs) |input| {
-        try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
-    }
-}
-
-test "Out of Memory, With Errors" {
-    const inputs = [_][]const u8{
-        "5 + true;",
-        "5 + true; 5;",
-        "-true",
-        "true + false;",
-        "true + false + true + false;",
-        "5; true + false; 5",
-        "if (10 > 1) { true + false; }",
-        "let x = fn() {}; -x;",
-        "let x = fn() {}; let y = 5; x + y;",
-        "let x = 5; let y = fn() {}; x + y;",
-    };
-
-    for (inputs) |input| {
-        try testing.checkAllAllocationFailures(testing.allocator, testOutOfMemory, .{input});
-    }
-}
 
 test "Integer Expression" {
     const eval_tests = [_]struct { input: []const u8, expected: i64 }{

@@ -13,6 +13,10 @@ pub fn init(alloc: Allocator) Environment {
     return Environment{ .alloc = alloc, .store = .empty, .outer = null };
 }
 
+pub fn enclose(self: *const Environment) Environment {
+    return Environment{ .alloc = self.alloc, .store = .empty, .outer = self };
+}
+
 pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
     if (self.store.get(name)) |some| {
         return some;
@@ -24,15 +28,9 @@ pub fn get(self: *const Environment, name: []const u8) ?obj.Object {
 
 pub fn set(self: *Environment, name: []const u8, value: obj.Object) Allocator.Error!void {
     const duped_name = try self.alloc.dupe(u8, name);
-    errdefer self.alloc.free(duped_name);
-    var duped_value = try value.dupe(self.alloc);
-    errdefer duped_value.deinit(self.alloc);
+    const duped_value = try value.dupe(self.alloc);
 
     try self.store.put(self.alloc, duped_name, duped_value);
-}
-
-pub fn isRootEnvironment(self: *const Environment) bool {
-    return self.outer == null;
 }
 
 pub fn print(self: *const Environment) void {
