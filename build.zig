@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const editline_dep = b.dependency("editline", .{ .target = target, .optimize = optimize });
 
     const exe = b.addExecutable(.{
-        .name = "monkey-lang-interpreter",
+        .name = "monkey-lang",
         .use_llvm = !is_x86_linux,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
