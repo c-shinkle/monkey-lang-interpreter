@@ -44,7 +44,7 @@ pub fn replStdIn() !void {
             error.EndOfStream => try buffer_writer.writeByte('\n'),
             else => e,
         };
-        if (std.mem.eql(u8, stream.getWritten(), "exit")) {
+        if (std.mem.eql(u8, stream.getWritten(), ".exit")) {
             return;
         }
 
@@ -85,10 +85,10 @@ pub fn replReadline() !void {
     var env = Environment.init(env_arena);
 
     while (true) : (try stdout_buffer.flush()) {
-        const raw_input = c_imports.readline(">> ") orelse break;
-        defer c_imports.rl_free(raw_input);
+        const raw_input = c_imports.readline(">> ") orelse return;
+        // defer c_imports.rl_free(raw_input);
         const slice_input = std.mem.span(raw_input);
-        if (std.mem.eql(u8, slice_input, ".exit")) break;
+        if (std.mem.eql(u8, slice_input, ".exit")) return;
         if (slice_input.len == 0) continue;
         _ = c_imports.add_history(raw_input);
 
@@ -124,7 +124,8 @@ pub fn replFile(relative_path: []const u8) !void {
         }
         return e;
     };
-    const read_bytes = try file.readToEndAlloc(arena, 1024);
+    const read_bytes = try file.readToEndAlloc(arena, std.math.maxInt(usize));
+    file.close();
 
     var lexer = Lexer.init(read_bytes);
     var parser = try Parser.init(&lexer, arena);

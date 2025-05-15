@@ -287,7 +287,7 @@ fn parseInfixExpression(
     };
 }
 
-fn parseBoolean(self: *Parser, _: Allocator) ParserError!Expression {
+fn parseBoolean(self: *const Parser, _: Allocator) ParserError!Expression {
     return Expression{
         .boolean_expression = ast.Boolean{
             .token = self.cur_token,
@@ -453,7 +453,7 @@ fn parseCallArguments(self: *Parser, alloc: Allocator) ParserError![]const Expre
     return try args.toOwnedSlice(alloc);
 }
 
-fn parseStringLiteral(self: *Parser, _: Allocator) ParserError!Expression {
+fn parseStringLiteral(self: *const Parser, _: Allocator) ParserError!Expression {
     return Expression{ .string_literal = ast.StringLiteral{ .token = self.cur_token } };
 }
 

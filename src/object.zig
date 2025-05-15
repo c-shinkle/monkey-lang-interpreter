@@ -172,7 +172,7 @@ pub const ReturnValue = struct {
         if (self.value) |value| try value.inspect(writer) else try writer.writeAll("null");
     }
 
-    pub fn dupe(self: ReturnValue, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const ReturnValue, alloc: Allocator) Allocator.Error!Object {
         var duped_value_ptr: ?*Object = null;
         if (self.value) |value| {
             const duped_value = try value.dupe(alloc);
@@ -190,7 +190,7 @@ pub const Error = struct {
         try writer.print("ERROR: {s}", .{self.message});
     }
 
-    pub fn dupe(self: Error, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const Error, alloc: Allocator) Allocator.Error!Object {
         return Object{ ._error = Error{ .message = try alloc.dupe(u8, self.message) } };
     }
 };
@@ -217,7 +217,7 @@ pub const Function = struct {
         try writer.writeByte('\n');
     }
 
-    pub fn dupe(self: Function, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const Function, alloc: Allocator) Allocator.Error!Object {
         var duped_parameters = std.ArrayListUnmanaged(ast.Identifier).empty;
         for (self.parameters) |param| {
             const duped_param = try param.dupe(alloc);
@@ -242,7 +242,7 @@ pub const String = struct {
         return try writer.print("{s}", .{self.value});
     }
 
-    pub fn dupe(self: String, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const String, alloc: Allocator) Allocator.Error!Object {
         const duped_value = try alloc.dupe(u8, self.value);
         return Object{ .string = String{ .value = duped_value } };
     }
@@ -289,7 +289,7 @@ pub const Array = struct {
         try writer.writeByte(']');
     }
 
-    pub fn dupe(self: Array, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const Array, alloc: Allocator) Allocator.Error!Object {
         const duped_elements = try alloc.alloc(Object, self.elements.len);
 
         for (0..self.elements.len) |i| {
@@ -323,7 +323,7 @@ pub const Dictionary = struct {
         try writer.writeByte('}');
     }
 
-    pub fn dupe(self: Dictionary, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const Dictionary, alloc: Allocator) Allocator.Error!Object {
         var duped_pairs = Object.HashMap(Object).empty;
         try duped_pairs.ensureTotalCapacity(alloc, self.pairs.capacity());
 

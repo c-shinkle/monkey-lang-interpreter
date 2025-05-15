@@ -6,7 +6,7 @@ literal: []const u8,
 
 const Token = @This();
 
-pub fn dupe(self: Token, alloc: Allocator) Allocator.Error!Token {
+pub fn dupe(self: *const Token, alloc: Allocator) Allocator.Error!Token {
     const literal = if (self.token_type.isLiteralAllocated())
         try alloc.dupe(u8, self.literal)
     else
