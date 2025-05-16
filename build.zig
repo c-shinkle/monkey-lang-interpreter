@@ -37,12 +37,15 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("readline");
     }
     exe.root_module.addOptions("build_config", options);
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    const run_step = b.step("repl", "Run the REPL");
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run the REPL with no args, or run interpreter with path as first argument");
     run_step.dependOn(&run_cmd.step);
 }
 

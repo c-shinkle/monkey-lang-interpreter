@@ -12,7 +12,7 @@ const c_imports = @cImport({
     @cInclude("readline/history.h");
 });
 
-pub fn replStdIn() !void {
+pub fn stdInRepl() !void {
     var stdin_reader = std.io.getStdIn().reader();
 
     const size: usize = 4096;
@@ -67,7 +67,7 @@ pub fn replStdIn() !void {
     }
 }
 
-pub fn replReadline() !void {
+pub fn readlineRepl() !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     const buffer_writer = stdout_buffer.writer().any();
     defer {
@@ -113,19 +113,20 @@ pub fn replReadline() !void {
     }
 }
 
-pub fn replFile(relative_path: []const u8) !void {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
-    defer arena_allocator.deinit();
-    const arena = arena_allocator.allocator();
-
+pub fn fileInterpreter(relative_path: []const u8) !void {
     const file = std.fs.cwd().openFile(relative_path, std.fs.File.OpenFlags{}) catch |e| {
         if (e == error.FileNotFound) {
             std.debug.print("File not found: {s}\n", .{relative_path});
         }
         return e;
     };
+    defer file.close();
+
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
     const read_bytes = try file.readToEndAlloc(arena, std.math.maxInt(usize));
-    file.close();
 
     var lexer = Lexer.init(read_bytes);
     var parser = try Parser.init(&lexer, arena);
