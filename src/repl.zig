@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const builtin = @import("builtin");
+
 const ast = @import("ast.zig");
 const Environment = @import("Environment.zig");
 const evaluator = @import("evaluator.zig");
@@ -68,6 +70,7 @@ pub fn stdInRepl() !void {
 }
 
 pub fn readlineRepl() !void {
+    std.debug.print("foo\n", .{});
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     const buffer_writer = stdout_buffer.writer().any();
     defer {
@@ -84,13 +87,27 @@ pub fn readlineRepl() !void {
     const env_arena = env_allocator.allocator();
     var env = Environment.init(env_arena);
 
+    const file_name = ".monkey_repl_history";
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const history_path_z = try getHistoryPath(file_name, &buf);
+    defer {
+        const write_errno = c_imports.write_history(history_path_z);
+        if (write_errno != 0) {
+            const fmt = "Failed to write history! Received errno {d}\n";
+            std.debug.print(fmt, .{write_errno});
+        }
+    }
+    const read_errno = c_imports.read_history(history_path_z);
+    if (read_errno != 0) {
+        return error.FailedReadHistory;
+    }
+
     while (true) : (try stdout_buffer.flush()) {
         const raw_input = c_imports.readline(">> ") orelse return;
-        // defer c_imports.rl_free(raw_input);
         const slice_input = std.mem.span(raw_input);
         if (std.mem.eql(u8, slice_input, ".exit")) return;
         if (slice_input.len == 0) continue;
-        _ = c_imports.add_history(raw_input);
+        c_imports.add_history(raw_input);
 
         var loop_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer loop_allocator.deinit();
@@ -114,7 +131,7 @@ pub fn readlineRepl() !void {
 }
 
 pub fn fileInterpreter(relative_path: []const u8) !void {
-    const file = std.fs.cwd().openFile(relative_path, std.fs.File.OpenFlags{}) catch |e| {
+    const file = std.fs.cwd().openFile(relative_path, .{}) catch |e| {
         if (e == error.FileNotFound) {
             std.debug.print("File not found: {s}\n", .{relative_path});
         }
@@ -148,4 +165,28 @@ pub fn fileInterpreter(relative_path: []const u8) !void {
             try buffer_writer.print("\t{s}\n", .{err});
         }
     }
+}
+
+fn getHistoryPath(file_name: []const u8, buf: []u8) ![:0]const u8 {
+    const home_path = switch (builtin.os.tag) {
+        .macos, .linux => try std.process.getEnvVarOwned(std.heap.smp_allocator, "HOME"),
+        else => error.UnsupportedOS,
+    };
+    defer std.heap.smp_allocator.free(home_path);
+
+    var home_dir = try std.fs.openDirAbsolute(home_path, std.fs.Dir.OpenOptions{});
+    defer home_dir.close();
+
+    home_dir.access(file_name, .{}) catch |e| switch (e) {
+        error.FileNotFound => {
+            std.debug.print("{s} is missing! Creating replacement...\n", .{file_name});
+            const temp = try home_dir.createFile(file_name, .{});
+            temp.close();
+        },
+        else => return e,
+    };
+
+    const history_filename = try home_dir.realpath(file_name, buf);
+    buf[history_filename.len] = 0;
+    return buf[0..history_filename.len :0];
 }
