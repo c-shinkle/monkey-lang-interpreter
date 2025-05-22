@@ -86,17 +86,15 @@ pub fn readlineRepl() !void {
     const env_arena = env_allocator.allocator();
     var env = Environment.init(env_arena);
 
-    // TODO investigate using FixedSizeAllocator (or whatever it's called)
-    var buf: [std.fs.max_path_bytes:0]u8 = undefined;
-    const history_path_z = try findHistoryPath(&buf);
+    const history_path = try findHistoryPath(env_arena);
     defer {
-        const write_errno = c_imports.write_history(history_path_z);
+        const write_errno = c_imports.write_history(history_path);
         if (write_errno != 0) {
             const fmt = "Failed to write history! Received errno {d}\n";
             std.debug.print(fmt, .{write_errno});
         }
     }
-    const read_errno = c_imports.read_history(history_path_z);
+    const read_errno = c_imports.read_history(history_path);
     if (read_errno != 0) {
         return error.ReadHistoryFailed;
     }
@@ -129,12 +127,11 @@ pub fn readlineRepl() !void {
     }
 }
 
-fn findHistoryPath(buf: []u8) ![:0]const u8 {
+fn findHistoryPath(alloc: std.mem.Allocator) ![*c]const u8 {
     const home_path = switch (builtin.os.tag) {
-        .macos, .linux => try std.process.getEnvVarOwned(std.heap.smp_allocator, "HOME"),
+        .macos, .linux => try std.process.getEnvVarOwned(alloc, "HOME"),
         else => return error.UnsupportedOS,
     };
-    defer std.heap.smp_allocator.free(home_path);
 
     var home_dir = try std.fs.openDirAbsolute(home_path, std.fs.Dir.OpenOptions{});
     defer home_dir.close();
@@ -142,16 +139,16 @@ fn findHistoryPath(buf: []u8) ![:0]const u8 {
     const file_name = ".monkey_repl_history";
     home_dir.access(file_name, .{}) catch |e| switch (e) {
         error.FileNotFound => {
-            std.debug.print("{s} is missing! Creating replacement...\n", .{file_name});
+            std.debug.print("history file is missing! Creating ~/{s} now...\n", .{file_name});
             const temp = try home_dir.createFile(file_name, .{});
             temp.close();
         },
         else => return e,
     };
 
-    const history_filename = try home_dir.realpathZ(file_name, buf);
-    buf[history_filename.len] = 0;
-    return buf[0..history_filename.len :0];
+    var buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const history_filename = try home_dir.realpathZ(file_name, &buf);
+    return try alloc.dupeZ(u8, history_filename);
 }
 
 pub fn fileInterpreter(relative_path: []const u8) !void {

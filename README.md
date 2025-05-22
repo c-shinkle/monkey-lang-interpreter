@@ -55,7 +55,7 @@ For user who want an improved user experience, you can link the GNU Readline lib
 by adding the `-Denable_readline` flag:
 
 ```
-zig build repl -Denable_readline
+zig build run -Denable_readline
 ```
 
 [You can find GNU Readline library instructions here.](https://tiswww.case.edu/php/chet/readline/rltop.html#Distributions)
