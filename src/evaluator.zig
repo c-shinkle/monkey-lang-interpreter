@@ -431,11 +431,11 @@ fn evalIndexExpression(
         return elements[@intCast(index_value)];
     }
 
-    if (left_eval == .dictionary) {
+    if (left_eval == ._hash) {
         return switch (index_eval) {
             .string, .boolean, .integer => val: {
                 // std.debug.print("Get key hash: {d}\n", .{index_eval.hash()});
-                break :val left_eval.dictionary.pairs.get(index_eval) orelse obj.NULL;
+                break :val left_eval._hash.pairs.get(index_eval) orelse obj.NULL;
             },
             else => try newError(alloc, "unusable as hash key: {s}", .{index_eval._type()}),
         };
@@ -472,7 +472,7 @@ fn evalHashLiteral(
         try pairs.put(alloc, key, value);
     }
 
-    return obj.Object{ .dictionary = obj.Dictionary{ .pairs = pairs } };
+    return obj.Object{ ._hash = obj.Hash{ .pairs = pairs } };
 }
 
 // Test Suite
@@ -1005,7 +1005,7 @@ test "Hash Literals" {
         1,
     );
 
-    try testing.expect(actual == .dictionary);
+    try testing.expect(actual == ._hash);
 }
 
 test "Hash Index Expressions" {

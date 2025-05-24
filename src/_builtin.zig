@@ -121,7 +121,3 @@ fn puts(_: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
     }
     return obj.NULL;
 }
-
-test {
-    std.testing.refAllDecls(@This());
-}

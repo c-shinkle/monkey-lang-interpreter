@@ -20,7 +20,7 @@ pub const FUNCTION_OBJ = "FUNCTION";
 pub const STRING_OBJ = "STRING";
 pub const BUILTIN_OBJ = "BUILTIN";
 pub const ARRAY_OBJ = "ARRAY";
-pub const DICTIONARY_OBJ = "DICTIONARY";
+pub const HASH_OBJ = "HASH";
 
 pub const TRUE = Object{ .boolean = Boolean{ .value = true } };
 pub const FALSE = Object{ .boolean = Boolean{ .value = false } };
@@ -36,7 +36,7 @@ pub const Object = union(enum) {
     string: String,
     builtin: Builtin,
     array: Array,
-    dictionary: Dictionary,
+    _hash: Hash,
 
     pub fn _type(self: Object) ObjectType {
         return switch (self) {
@@ -49,7 +49,7 @@ pub const Object = union(enum) {
             .string => STRING_OBJ,
             .builtin => BUILTIN_OBJ,
             .array => ARRAY_OBJ,
-            .dictionary => DICTIONARY_OBJ,
+            ._hash => HASH_OBJ,
         };
     }
 
@@ -214,7 +214,8 @@ pub const Function = struct {
         try writer.writeAll(") {\n");
 
         try self.body.string(writer);
-        try writer.writeByte('\n');
+
+        try writer.writeAll("\n}");
     }
 
     pub fn dupe(self: *const Function, alloc: Allocator) Allocator.Error!Object {
@@ -300,10 +301,10 @@ pub const Array = struct {
     }
 };
 
-pub const Dictionary = struct {
+pub const Hash = struct {
     pairs: Object.HashMap(Object),
 
-    pub fn inspect(self: *const Dictionary, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Hash, writer: AnyWriter) ObjectError!void {
         try writer.writeByte('{');
 
         var iter = self.pairs.iterator();
@@ -323,7 +324,7 @@ pub const Dictionary = struct {
         try writer.writeByte('}');
     }
 
-    pub fn dupe(self: *const Dictionary, alloc: Allocator) Allocator.Error!Object {
+    pub fn dupe(self: *const Hash, alloc: Allocator) Allocator.Error!Object {
         var duped_pairs = Object.HashMap(Object).empty;
         try duped_pairs.ensureTotalCapacity(alloc, self.pairs.capacity());
 
@@ -334,7 +335,7 @@ pub const Dictionary = struct {
             duped_pairs.putAssumeCapacity(duped_key, duped_value);
         }
 
-        return Object{ .dictionary = Dictionary{ .pairs = duped_pairs } };
+        return Object{ ._hash = Hash{ .pairs = duped_pairs } };
     }
 };
 
