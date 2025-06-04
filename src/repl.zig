@@ -94,17 +94,14 @@ pub fn readlineRepl() !void {
             std.debug.print(fmt, .{write_errno});
         }
     }
-    const read_errno = c_imports.read_history(history_path);
-    if (read_errno != 0) {
-        return error.ReadHistoryFailed;
-    }
+    _ = c_imports.read_history(history_path);
 
     while (true) : (try stdout_buffer.flush()) {
         const raw_input = c_imports.readline(">> ") orelse return;
         const slice_input = std.mem.span(raw_input);
         if (std.mem.eql(u8, slice_input, ".exit")) return;
         if (slice_input.len == 0) continue;
-        c_imports.add_history(raw_input);
+        _ = c_imports.add_history(raw_input);
 
         var loop_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer loop_allocator.deinit();
