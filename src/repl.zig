@@ -8,12 +8,6 @@ const evaluator = @import("evaluator.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
 
-const c_imports = @cImport({
-    @cInclude("stdio.h");
-    @cInclude("readline/readline.h");
-    @cInclude("readline/history.h");
-});
-
 pub fn stdInRepl() !void {
     var stdin_reader = std.io.getStdIn().reader();
 
@@ -69,7 +63,7 @@ pub fn stdInRepl() !void {
     }
 }
 
-pub fn readlineRepl() !void {
+pub fn libraryRepl(library: anytype) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     const buffer_writer = stdout_buffer.writer().any();
     defer {
@@ -88,20 +82,20 @@ pub fn readlineRepl() !void {
 
     const history_path = try findHistoryPath(env_arena);
     defer {
-        const write_errno = c_imports.write_history(history_path);
+        const write_errno = library.write_history(history_path);
         if (write_errno != 0) {
             const fmt = "Failed to write history! Received errno {d}\n";
             std.debug.print(fmt, .{write_errno});
         }
     }
-    _ = c_imports.read_history(history_path);
+    _ = library.read_history(history_path);
 
     while (true) : (try stdout_buffer.flush()) {
-        const raw_input = c_imports.readline(">> ") orelse return;
+        const raw_input = library.readline(">> ") orelse return;
         const slice_input = std.mem.span(raw_input);
         if (std.mem.eql(u8, slice_input, ".exit")) return;
         if (slice_input.len == 0) continue;
-        _ = c_imports.add_history(raw_input);
+        _ = library.add_history(raw_input);
 
         var loop_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer loop_allocator.deinit();

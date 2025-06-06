@@ -19,9 +19,16 @@ pub fn build(b: *std.Build) void {
     const enable_readline = b.option(
         bool,
         "enable_readline",
-        "Should build link against readline",
+        "Should build link against System Library \"readline\"",
     ) orelse false;
     options.addOption(bool, "enable_readline", enable_readline);
+
+    const enable_editline = b.option(
+        bool,
+        "enable_editline",
+        "Should build link against Static Library \"editline\"",
+    ) orelse false;
+    options.addOption(bool, "enable_editline", enable_editline);
 
     const exe = b.addExecutable(.{
         .name = "monkey-lang",
@@ -33,9 +40,15 @@ pub fn build(b: *std.Build) void {
             .link_libc = enable_readline,
         }),
     });
+
     if (enable_readline) {
         exe.linkSystemLibrary("readline");
     }
+    if (enable_editline) {
+        const editline_dep = b.dependency("editline", .{ .target = target, .optimize = optimize });
+        exe.linkLibrary(editline_dep.artifact("editline"));
+    }
+
     exe.root_module.addOptions("build_config", options);
     b.installArtifact(exe);
 

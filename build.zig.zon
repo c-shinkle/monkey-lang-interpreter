@@ -1,6 +1,12 @@
 .{
     .name = .monkey_lang_interpreter,
     .version = "0.1.0",
+    .dependencies = .{
+        .editline = .{
+            .url = "git+https://github.com/c-shinkle/editline.git#bba0a75b2365fb126ef78560ccfd08921699f0ee",
+            .hash = "editline-0.0.0-SZoHi6INAAATHNuRwt8jle-r7KD9mIdVAfJ21DSf5STx",
+        },
+    },
     .fingerprint = 0xf1005f8723ac9884,
     .minimum_zig_version = "0.14.0",
     .paths = .{
