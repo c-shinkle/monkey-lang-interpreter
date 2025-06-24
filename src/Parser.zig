@@ -1,16 +1,3 @@
-const std = @import("std");
-const testing = std.testing;
-const Allocator = std.mem.Allocator;
-
-const ast = @import("ast.zig");
-const Expression = ast.Expression;
-const ExpressionStatement = ast.ExpressionStatement;
-const Lexer = @import("Lexer.zig");
-const Token = @import("Token.zig");
-const TokenType = Token.TokenType;
-const Operator = Token.Operator;
-const findOperatorByLiteral = Token.findOperatorByLiteral;
-
 lexer: *Lexer,
 cur_token: Token,
 peek_token: Token,
@@ -683,14 +670,9 @@ test "Let Statement" {
         const stmts = program.statements;
         try testing.expectEqual(1, stmts.len);
         try testLetStatement(stmts[0], let_test.expected_identifier);
-        const let_stmt = switch (stmts[0]) {
-            .let_statement => |let_stmt| let_stmt,
-            else => |other| {
-                const fmt = "Expect LetStatement, got {s}";
-                const type_name = @typeName(@TypeOf(other));
-                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-            },
-        };
+
+        try testing.expect(stmts[0] == .let_statement);
+        const let_stmt = stmts[0].let_statement;
         try testLiteralExpression(let_stmt.value, let_test.expected_value);
     }
 }
@@ -714,14 +696,8 @@ test "Return Statement" {
         const stmts = program.statements;
         try testing.expectEqual(1, stmts.len);
 
-        const return_stmt = switch (stmts[0]) {
-            .return_statement => |ret_stmt| ret_stmt,
-            else => |other| {
-                const fmt = "Expect ReturnStatement, got {s}";
-                const type_name = @typeName(@TypeOf(other));
-                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-            },
-        };
+        try testing.expect(stmts[0] == .return_statement);
+        const return_stmt = stmts[0].return_statement;
         try testing.expectEqualStrings("return", return_stmt.tokenLiteral());
         try testLiteralExpression(return_stmt.return_value, return_test.expected_value);
     }
@@ -740,22 +716,11 @@ test "Identifier Expression" {
 
     try testing.expectEqual(1, program.statements.len);
 
-    const stmt = switch (program.statements[0]) {
-        .expression_statement => |stmt| stmt,
-        else => |stmt| {
-            const fmt = "Expect ExpressionStatement, got {s}";
-            const type_name = @typeName(@TypeOf(stmt));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
-    const ident = switch (stmt.expression) {
-        .identifier => |ident| ident,
-        else => |ident| {
-            const fmt = "Expect Identifier, got {s}";
-            const type_name = @typeName(@TypeOf(ident));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp_stmt = program.statements[0].expression_statement;
+
+    try testing.expect(exp_stmt.expression == .identifier);
+    const ident = exp_stmt.expression.identifier;
 
     try testing.expectEqualStrings("foobar", ident.value);
     try testing.expectEqualStrings("foobar", ident.tokenLiteral());
@@ -774,22 +739,11 @@ test "Integer Literal Expression" {
 
     try testing.expectEqual(1, program.statements.len);
 
-    const stmt = switch (program.statements[0]) {
-        .expression_statement => |stmt| stmt,
-        else => |stmt| {
-            const fmt = "Expect ExpressionStatement, got {s}";
-            const type_name = @typeName(@TypeOf(stmt));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
-    const literal = switch (stmt.expression) {
-        .integer_literal => |literal| literal,
-        else => |exp| {
-            const fmt = "Expect Integer Literal, got {s}";
-            const type_name = @typeName(@TypeOf(exp));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const stmt = program.statements[0].expression_statement;
+
+    try testing.expect(stmt.expression == .integer_literal);
+    const literal = stmt.expression.integer_literal;
 
     try testing.expectEqual(5, literal.value);
     try testing.expectEqualStrings("5", literal.tokenLiteral());
@@ -815,14 +769,11 @@ test "Prefix Expression" {
         const stmt = program.statements;
         try testing.expectEqual(1, stmt.len);
 
-        const prefix_stmt: ExpressionStatement = switch (stmt[0]) {
-            .expression_statement => |exp_stmt| exp_stmt,
-            else => @panic("statement is not ExpressionStatement"),
-        };
-        const exp: ast.PrefixExpression = switch (prefix_stmt.expression) {
-            .prefix_expression => |prefix| prefix,
-            else => @panic("statement was not ast.PrefixExpression"),
-        };
+        try testing.expect(stmt[0] == .expression_statement);
+        const prefix_stmt = stmt[0].expression_statement;
+
+        try testing.expect(prefix_stmt.expression == .prefix_expression);
+        const exp = prefix_stmt.expression.prefix_expression;
 
         try testing.expectEqual(prefix_test.operator, exp.operator);
         try testLiteralExpression(exp.right.*, prefix_test.value);
@@ -912,10 +863,8 @@ test "Infix Expression" {
         const stmts = program.statements;
         try testing.expectEqual(1, stmts.len);
 
-        const exp_stmt = switch (stmts[0]) {
-            .expression_statement => |exp_stmt| exp_stmt,
-            else => @panic("stmts[0] is not ExpressionStatement"),
-        };
+        try testing.expect(stmts[0] == .expression_statement);
+        const exp_stmt = stmts[0].expression_statement;
 
         try testInfixExpression(
             exp_stmt.expression,
@@ -927,117 +876,114 @@ test "Infix Expression" {
 }
 
 test "Operator Precedence" {
-    const string_tests = [_]struct {
-        input: []const u8,
-        expected: []const u8,
-    }{
+    const string_tests = .{
         .{
-            .input = "-a * b",
-            .expected = "((-a) * b)",
+            "-a * b",
+            "((-a) * b)",
         },
         .{
-            .input = "!-a",
-            .expected = "(!(-a))",
+            "!-a",
+            "(!(-a))",
         },
         .{
-            .input = "a + b + c",
-            .expected = "((a + b) + c)",
+            "a + b + c",
+            "((a + b) + c)",
         },
         .{
-            .input = "a + b - c",
-            .expected = "((a + b) - c)",
+            "a + b - c",
+            "((a + b) - c)",
         },
         .{
-            .input = "a * b * c",
-            .expected = "((a * b) * c)",
+            "a * b * c",
+            "((a * b) * c)",
         },
         .{
-            .input = "a * b / c",
-            .expected = "((a * b) / c)",
+            "a * b / c",
+            "((a * b) / c)",
         },
         .{
-            .input = "a + b / c",
-            .expected = "(a + (b / c))",
+            "a + b / c",
+            "(a + (b / c))",
         },
         .{
-            .input = "a + b * c + d / e - f",
-            .expected = "(((a + (b * c)) + (d / e)) - f)",
+            "a + b * c + d / e - f",
+            "(((a + (b * c)) + (d / e)) - f)",
         },
         .{
-            .input = "3 + 4; -5 * 5",
-            .expected = "(3 + 4)((-5) * 5)",
+            "3 + 4; -5 * 5",
+            "(3 + 4)((-5) * 5)",
         },
         .{
-            .input = "5 > 4 == 3 < 4",
-            .expected = "((5 > 4) == (3 < 4))",
+            "5 > 4 == 3 < 4",
+            "((5 > 4) == (3 < 4))",
         },
         .{
-            .input = "5 < 4 != 3 > 4",
-            .expected = "((5 < 4) != (3 > 4))",
+            "5 < 4 != 3 > 4",
+            "((5 < 4) != (3 > 4))",
         },
         .{
-            .input = "3 + 4 * 5 == 3 * 1 + 4 * 5",
-            .expected = "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+            "3 + 4 * 5 == 3 * 1 + 4 * 5",
+            "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
         },
         .{
-            .input = "true",
-            .expected = "true",
+            "true",
+            "true",
         },
         .{
-            .input = "false",
-            .expected = "false",
+            "false",
+            "false",
         },
         .{
-            .input = "3 > 5 == false",
-            .expected = "((3 > 5) == false)",
+            "3 > 5 == false",
+            "((3 > 5) == false)",
         },
         .{
-            .input = "3 < 5 == true",
-            .expected = "((3 < 5) == true)",
+            "3 < 5 == true",
+            "((3 < 5) == true)",
         },
         .{
-            .input = "1 + (2 + 3) + 4",
-            .expected = "((1 + (2 + 3)) + 4)",
+            "1 + (2 + 3) + 4",
+            "((1 + (2 + 3)) + 4)",
         },
         .{
-            .input = "(5 + 5) * 2",
-            .expected = "((5 + 5) * 2)",
+            "(5 + 5) * 2",
+            "((5 + 5) * 2)",
         },
         .{
-            .input = "2 / (5 + 5)",
-            .expected = "(2 / (5 + 5))",
+            "2 / (5 + 5)",
+            "(2 / (5 + 5))",
         },
         .{
-            .input = "(5 + 5) * 2 * (5 + 5)",
-            .expected = "(((5 + 5) * 2) * (5 + 5))",
+            "(5 + 5) * 2 * (5 + 5)",
+            "(((5 + 5) * 2) * (5 + 5))",
         },
         .{
-            .input = "-(5 + 5)",
-            .expected = "(-(5 + 5))",
+            "-(5 + 5)",
+            "(-(5 + 5))",
         },
         .{
-            .input = "!(true == true)",
-            .expected = "(!(true == true))",
+            "!(true == true)",
+            "(!(true == true))",
         },
         .{
-            .input = "a + add(b * c) + d",
-            .expected = "((a + add((b * c))) + d)",
+            "a + add(b * c) + d",
+            "((a + add((b * c))) + d)",
         },
         .{
-            .input = "add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))",
-            .expected = "add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))",
+            "add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))",
+            "add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))",
         },
         .{
-            .input = "add(a + b + c * d / f + g)",
-            .expected = "add((((a + b) + ((c * d) / f)) + g))",
+            "add(a + b + c * d / f + g)",
+            "add((((a + b) + ((c * d) / f)) + g))",
         },
         .{
-            .input = "a * [1, 2, 3, 4][b * c] *d",
-            .expected = "((a * ([1, 2, 3, 4][(b * c)])) * d)",
+            "a * [1, 2, 3, 4][b * c] *d",
+            "((a * ([1, 2, 3, 4][(b * c)])) * d)",
         },
         .{
-            .input = "add(a * b[2], b[1], 2 * [1, 2][1])",
-            .expected = "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
+            "add(a * b[2], b[1], 2 * [1, 2][1])",
+            "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
         },
     };
 
@@ -1046,32 +992,28 @@ test "Operator Precedence" {
 
     var array_list = std.ArrayList(u8).init(arena.allocator());
     const writer = array_list.writer().any();
-    for (string_tests) |string_test| {
-        var lexer = Lexer.init(string_test.input);
+    inline for (string_tests) |string_test| {
+        const input, const expected = string_test;
+        var lexer = Lexer.init(input);
         var parser = try Parser.init(&lexer, arena.allocator());
         const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
 
         try program.string(writer);
-        try testing.expectEqualStrings(string_test.expected, array_list.items);
+        try testing.expectEqualStrings(expected, array_list.items);
 
         array_list.clearRetainingCapacity();
     }
 }
 
 test "Boolean Expression" {
-    const bool_tests = [_]struct {
-        input: []const u8,
-        expected_boolean: bool,
-    }{
-        .{ .input = "true;", .expected_boolean = true },
-        .{ .input = "false;", .expected_boolean = false },
-    };
+    const bool_tests = .{ .{ "true;", true }, .{ "false;", false } };
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    for (bool_tests) |bool_test| {
-        var lexer = Lexer.init(bool_test.input);
+    inline for (bool_tests) |bool_test| {
+        const input, const expected = bool_test;
+        var lexer = Lexer.init(input);
         var parser = try Parser.init(&lexer, arena.allocator());
         const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
@@ -1079,18 +1021,13 @@ test "Boolean Expression" {
         const stmts = program.statements;
         try testing.expectEqual(1, stmts.len);
 
-        const boolean_expression = switch (stmts[0]) {
-            .expression_statement => |exp_stmt| switch (exp_stmt.expression) {
-                .boolean_expression => |boolean| boolean,
-                else => |other| {
-                    const fmt = "exp not ast.BooleanExpression. got={s}\n";
-                    const type_name = @typeName(@TypeOf(other));
-                    @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-                },
-            },
-            else => unreachable,
-        };
-        try testing.expectEqual(bool_test.expected_boolean, boolean_expression.value);
+        try testing.expect(stmts[0] == .expression_statement);
+        const exp = stmts[0].expression_statement.expression;
+
+        try testing.expect(exp == .boolean_expression);
+        const bool_exp = exp.boolean_expression;
+
+        try testing.expectEqual(expected, bool_exp.value);
     }
 }
 
@@ -1105,26 +1042,18 @@ test "If Expression" {
 
     try testing.expectEqual(1, program.statements.len);
 
-    const exp_stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
-    const if_exp = switch (exp_stmt.expression) {
-        .if_expression => |if_exp| if_exp,
-        else => |other| {
-            const fmt = "Expect IfExpression, got {s}";
-            const type_name = @typeName(@TypeOf(other));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp_stmt = program.statements[0].expression_statement;
+
+    try testing.expect(exp_stmt.expression == .if_expression);
+    const if_exp = exp_stmt.expression.if_expression;
 
     try testInfixExpression(if_exp.condition.*, "x", Operator.lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
-    const consequence = switch (if_exp.consequence.statements[0]) {
-        .expression_statement => |con_stmt| con_stmt,
-        else => @panic("if_exp.consequence.statements[0] is not ExpressionStatement"),
-    };
+    try testing.expect(if_exp.consequence.statements[0] == .expression_statement);
+    const consequence = if_exp.consequence.statements[0].expression_statement;
+
     try testIdentifier(consequence.expression, "x");
     try testing.expectEqual(if_exp.alternative, null);
 }
@@ -1141,35 +1070,23 @@ test "If Else Expression" {
 
     try testing.expectEqual(1, program.statements.len);
 
-    const exp_stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp_stmt = program.statements[0].expression_statement;
 
-    const if_exp = switch (exp_stmt.expression) {
-        .if_expression => |if_exp| if_exp,
-        else => |other| {
-            const fmt = "Expect IfExpression, got {s}";
-            const type_name = @typeName(@TypeOf(other));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
+    try testing.expect(exp_stmt.expression == .if_expression);
+    const if_exp = exp_stmt.expression.if_expression;
 
     try testInfixExpression(if_exp.condition.*, "x", Operator.lt, "y");
 
     try testing.expectEqual(1, if_exp.consequence.statements.len);
-    const consequence = switch (if_exp.consequence.statements[0]) {
-        .expression_statement => |con_stmt| con_stmt,
-        else => @panic("if_exp.consequence.statements[0] is not ExpressionStatement"),
-    };
+    try testing.expect(if_exp.consequence.statements[0] == .expression_statement);
+    const consequence = if_exp.consequence.statements[0].expression_statement;
     try testIdentifier(consequence.expression, "x");
 
     const alternative = if_exp.alternative orelse return error.TestExpectedEqual;
     try testing.expectEqual(1, alternative.statements.len);
-    const alt_stmt = switch (alternative.statements[0]) {
-        .expression_statement => |alt_stmt| alt_stmt,
-        else => @panic("if_exp.alternative.statements[0] is not ExpressionStatement"),
-    };
+    try testing.expect(alternative.statements[0] == .expression_statement);
+    const alt_stmt = alternative.statements[0].expression_statement;
     try testIdentifier(alt_stmt.expression, "y");
 }
 
@@ -1185,19 +1102,11 @@ test "Function Literal Expression" {
 
     try testing.expectEqual(1, program.statements.len);
 
-    const fn_lit_exp_stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const fn_lit_exp_stmt = program.statements[0].expression_statement;
 
-    const fn_lit = switch (fn_lit_exp_stmt.expression) {
-        .function_literal => |fn_lit| fn_lit,
-        else => |other| {
-            const fmt = "Expect FunctionLiteral, got {s}";
-            const type_name = @typeName(@TypeOf(other));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
+    try testing.expect(fn_lit_exp_stmt.expression == .function_literal);
+    const fn_lit = fn_lit_exp_stmt.expression.function_literal;
 
     try testing.expectEqual(2, fn_lit.parameters.len);
 
@@ -1206,10 +1115,8 @@ test "Function Literal Expression" {
 
     try testing.expectEqual(1, fn_lit.body.statements.len);
 
-    const body_exp_stmt = switch (fn_lit.body.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(fn_lit.body.statements[0] == .expression_statement);
+    const body_exp_stmt = fn_lit.body.statements[0].expression_statement;
     try testInfixExpression(body_exp_stmt.expression, "x", Operator.plus, "y");
 }
 
@@ -1240,19 +1147,13 @@ test "Function Parameter Parsing" {
         const program = try parser.parseProgram(arena.allocator());
         try checkParserErrors(&parser);
 
-        const stmt = switch (program.statements[0]) {
-            .expression_statement => |stmt| stmt,
-            else => @panic("stmts[0] is not ExpressionStatement"),
-        };
-        const function = switch (stmt.expression) {
-            .function_literal => |function| function,
-            else => |other| {
-                const fmt = "Expect FunctionLiteral, got {s}";
-                const type_name = @typeName(@TypeOf(other));
-                @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-            },
-        };
+        try testing.expect(program.statements[0] == .expression_statement);
+        const stmt = program.statements[0].expression_statement;
+
+        try testing.expect(stmt.expression == .function_literal);
+        const function = stmt.expression.function_literal;
         try testing.expectEqual(param_test.expected_params.len, function.parameters.len);
+
         for (param_test.expected_params, 0..) |param, i| {
             const exp = Expression{ .identifier = function.parameters[i] };
             try testLiteralExpression(exp, param);
@@ -1273,22 +1174,11 @@ test "Call Expression Parsing" {
     const stmts = program.statements;
     try testing.expectEqual(1, stmts.len);
 
-    const exp_stmt = switch (stmts[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => |other| {
-            const fmt = "Expect ExpressionStatement, got {s}";
-            const type_name = @typeName(@TypeOf(other));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
-    const call_exp = switch (exp_stmt.expression) {
-        .call_expression => |call_exp| call_exp,
-        else => |other| {
-            const fmt = "Expect CallExpression, got {s}";
-            const type_name = @typeName(@TypeOf(other));
-            @panic(std.fmt.comptimePrint(fmt, .{type_name}));
-        },
-    };
+    try testing.expect(stmts[0] == .expression_statement);
+    const exp_stmt = stmts[0].expression_statement;
+
+    try testing.expect(exp_stmt.expression == .call_expression);
+    const call_exp = exp_stmt.expression.call_expression;
     try testIdentifier(call_exp.function.*, "add");
 
     const args = call_exp.arguments;
@@ -1309,10 +1199,8 @@ test "String Literal Expression" {
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
-    const stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const stmt = program.statements[0].expression_statement;
 
     try testing.expect(stmt.expression == .string_literal);
     const literal = stmt.expression.string_literal;
@@ -1331,20 +1219,16 @@ test "Array Literal" {
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
-    const expression = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt.expression,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp = program.statements[0].expression_statement.expression;
 
-    const array = switch (expression) {
-        .array_literal => |arr| arr,
-        else => @panic("exp not ast.ArrayLiteral"),
-    };
+    try testing.expect(exp == .array_literal);
+    const elements = exp.array_literal.elements;
 
-    try testing.expectEqual(3, array.elements.len);
-    try testIntegerLiteral(array.elements[0], 1);
-    try testInfixExpression(array.elements[1], 2, Operator.asterisk, 2);
-    try testInfixExpression(array.elements[2], 3, Operator.plus, 3);
+    try testing.expectEqual(3, elements.len);
+    try testIntegerLiteral(elements[0], 1);
+    try testInfixExpression(elements[1], 2, Operator.asterisk, 2);
+    try testInfixExpression(elements[2], 3, Operator.plus, 3);
 }
 
 test "Index Expression" {
@@ -1358,10 +1242,8 @@ test "Index Expression" {
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
-    const exp_stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp_stmt = program.statements[0].expression_statement;
 
     try testing.expect(exp_stmt.expression == .index_expression);
     const index_exp = exp_stmt.expression.index_expression;
@@ -1382,10 +1264,8 @@ test "Hash Literals, no Keys" {
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
-    const exp_stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp_stmt = program.statements[0].expression_statement;
 
     try testing.expect(exp_stmt.expression == .hash_literal);
     const hash = exp_stmt.expression.hash_literal;
@@ -1405,10 +1285,8 @@ test "Hash Literals, String Keys" {
     try checkParserErrors(&parser);
 
     try testing.expectEqual(1, program.statements.len);
-    const exp_stmt = switch (program.statements[0]) {
-        .expression_statement => |exp_stmt| exp_stmt,
-        else => @panic("stmts[0] is not ExpressionStatement"),
-    };
+    try testing.expect(program.statements[0] == .expression_statement);
+    const exp_stmt = program.statements[0].expression_statement;
 
     try testing.expect(exp_stmt.expression == .hash_literal);
     const hash = exp_stmt.expression.hash_literal;
@@ -1424,8 +1302,8 @@ test "Hash Literals, String Keys" {
     var iter = hash.pairs.iterator();
     while (iter.next()) |entry| {
         try testing.expect(entry.key_ptr.* == .string_literal);
-        const expected_value = expected.get(entry.key_ptr.*.string_literal.token.literal) orelse
-            return error.TestExpectedEqual;
+        const lit = entry.key_ptr.*.string_literal.token.literal;
+        const expected_value = expected.get(lit) orelse return error.TestExpectedEqual;
 
         try testIntegerLiteral(entry.value_ptr.*, expected_value);
     }
@@ -1510,32 +1388,6 @@ test "Hash Literals, Integer Keys" {
 
 //Test Helpers
 
-fn testOutOfMemory(alloc: Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, arena.allocator());
-    _ = try parser.parseProgram(arena.allocator());
-}
-
-fn testOutOfMemoryWithParserErrors(
-    alloc: Allocator,
-    input: []const u8,
-    expecteds: []const []const u8,
-) !void {
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&lexer, arena.allocator());
-    _ = try parser.parseProgram(arena.allocator());
-
-    const parser_errors = parser.errors.items;
-    try testing.expectEqual(expecteds.len, parser_errors.len);
-    for (parser_errors, 0..) |parser_error, i| {
-        try testing.expectEqualStrings(expecteds[i], parser_error);
-    }
-}
-
 fn checkParserErrors(p: *const Parser) !void {
     const errors = p.errors.items;
     if (errors.len == 0) {
@@ -1549,21 +1401,21 @@ fn checkParserErrors(p: *const Parser) !void {
     return error.FoundParserErrors;
 }
 
-fn testLetStatement(s: ast.Statement, value: []const u8) !void {
-    try testing.expectEqualStrings(s.tokenLiteral(), "let");
-    try testing.expect(s == .let_statement);
+fn testLetStatement(stmt: ast.Statement, expected: []const u8) !void {
+    try testing.expectEqualStrings(stmt.tokenLiteral(), "let");
+    try testing.expect(stmt == .let_statement);
 
-    const let_stmt = s.let_statement;
-    try testing.expectEqualStrings(value, let_stmt.name.value);
-    try testing.expectEqualStrings(value, let_stmt.name.tokenLiteral());
+    const let_stmt = stmt.let_statement;
+    try testing.expectEqualStrings(expected, let_stmt.name.value);
+    try testing.expectEqualStrings(expected, let_stmt.name.tokenLiteral());
 }
 
-fn testIntegerLiteral(il: Expression, value: i64) !void {
-    try testing.expect(il == .integer_literal);
-    const integ = il.integer_literal;
+fn testIntegerLiteral(exp: Expression, expected: i64) !void {
+    try testing.expect(exp == .integer_literal);
+    const int_lit = exp.integer_literal;
 
-    try testing.expectEqual(value, integ.value);
-    try testing.expectFmt(integ.tokenLiteral(), "{d}", .{value});
+    try testing.expectEqual(expected, int_lit.value);
+    try testing.expectFmt(int_lit.tokenLiteral(), "{d}", .{expected});
 }
 
 fn testIdentifier(exp: Expression, expected: []const u8) !void {
@@ -1574,17 +1426,17 @@ fn testIdentifier(exp: Expression, expected: []const u8) !void {
     try testing.expectEqualStrings(expected, ident.tokenLiteral());
 }
 
-fn testLiteralExpression(exp: Expression, value: anytype) !void {
-    const type_info = @typeInfo(@TypeOf(value));
+fn testLiteralExpression(exp: Expression, expected: anytype) !void {
+    const type_info = @typeInfo(@TypeOf(expected));
     // std.debug.print("{}\n", .{type_info});
     switch (type_info) {
-        .comptime_int, .int => try testIntegerLiteral(exp, value),
-        .bool => try testBooleanLiteral(exp, value),
+        .comptime_int, .int => try testIntegerLiteral(exp, expected),
+        .bool => try testBooleanLiteral(exp, expected),
         .pointer => |pointer| switch (pointer.size) {
-            .one, .slice => try testIdentifier(exp, value),
+            .one, .slice => try testIdentifier(exp, expected),
             else => return error.TestExpectedEqual,
         },
-        .array => try testIdentifier(exp, &value),
+        .array => try testIdentifier(exp, &expected),
         else => return error.TestExpectedEqual,
     }
 }
@@ -1609,3 +1461,16 @@ fn testBooleanLiteral(exp: Expression, expected: bool) !void {
 test {
     std.testing.refAllDecls(Parser);
 }
+
+const std = @import("std");
+const testing = std.testing;
+const Allocator = std.mem.Allocator;
+
+const ast = @import("ast.zig");
+const Expression = ast.Expression;
+const ExpressionStatement = ast.ExpressionStatement;
+const Lexer = @import("Lexer.zig");
+const Token = @import("Token.zig");
+const TokenType = Token.TokenType;
+const Operator = Token.Operator;
+const findOperatorByLiteral = Token.findOperatorByLiteral;

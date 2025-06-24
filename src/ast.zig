@@ -1,12 +1,3 @@
-const std = @import("std");
-const testing = std.testing;
-const Allocator = std.mem.Allocator;
-const AnyWriter = std.io.AnyWriter;
-
-const Token = @import("Token.zig");
-const ScopedTokenType = Token.ScopedTokenType;
-const getLiteralByOperator = Token.getLiteralByOperator;
-
 pub const Node = union(enum) {
     program: Program,
     statement: Statement,
@@ -788,3 +779,12 @@ pub const HashLiteral = struct {
 test {
     std.testing.refAllDecls(@This());
 }
+
+const std = @import("std");
+const testing = std.testing;
+const Allocator = std.mem.Allocator;
+const AnyWriter = std.io.AnyWriter;
+
+const Token = @import("Token.zig");
+const ScopedTokenType = Token.ScopedTokenType;
+const getLiteralByOperator = Token.getLiteralByOperator;
