@@ -3,8 +3,8 @@
     .version = "0.1.0",
     .dependencies = .{
         .editline = .{
-            .url = "git+https://github.com/allyourcodebase/editline.git#4fa7f2935f423d2a4d873e5dbe4aec65f6c1783a",
-            .hash = "editline-0.0.0-SZoHiwwSAADssELefhrPmVu7YX8ge_qQ32TR0pTBuext",
+            .url = "https://github.com/allyourcodebase/editline/archive/refs/tags/1.7.1-1.tar.gz",
+            .hash = "editline-1.17.1-SZoHiw0SAACO7MpMWO05xSzzgE5zjVSbzjuGylZq3r9z",
         },
     },
     .fingerprint = 0xf1005f8723ac9884,
