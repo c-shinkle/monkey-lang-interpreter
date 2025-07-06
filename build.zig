@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const is_x86_linux = target.result.cpu.arch.isX86() and target.result.os.tag == .linux;
-    const test_step = b.step("test", "Run unit tests");
+    const test_step = b.step("test", "Run all unit tests");
 
     compile_unit_tests(b, "Token", target, optimize, test_step);
     compile_unit_tests(b, "Lexer", target, optimize, test_step);
@@ -43,8 +43,7 @@ pub fn build(b: *std.Build) void {
 
     if (enable_readline) {
         exe.linkSystemLibrary("readline");
-    }
-    if (enable_editline) {
+    } else if (enable_editline) {
         const editline_dep = b.dependency("editline", .{ .target = target, .optimize = optimize });
         exe.linkLibrary(editline_dep.artifact("editline"));
     }
@@ -84,6 +83,6 @@ fn compile_unit_tests(
     b.installArtifact(unit_tests);
     const run_unit_tests = b.addRunArtifact(unit_tests);
     test_step.dependOn(&run_unit_tests.step);
-    const unit_test_step = b.step(name, std.fmt.comptimePrint("Run {s}", .{name}));
+    const unit_test_step = b.step(name, "Run " ++ name ++ " tests");
     unit_test_step.dependOn(&run_unit_tests.step);
 }
