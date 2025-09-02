@@ -2,9 +2,9 @@
     .name = .monkey_lang_interpreter,
     .version = "0.1.0",
     .dependencies = .{
-        .editline = .{
-            .url = "https://github.com/allyourcodebase/editline/archive/refs/tags/1.17.1-2.tar.gz",
-            .hash = "editline-1.17.1-SZoHiwwSAABNmzWWZFqX694f-YONeEsdMm0Fgay6LHVp",
+        .anyline = .{
+            .url = "git+https://github.com/c-shinkle/anyline.git#3c74e9962295e832995f4249002c29e11cea885c",
+            .hash = "anyline-0.0.0-PM_c765WAABmH5mnq608vrEAA4ta1_-w51bM5shGtVvj",
         },
     },
     .fingerprint = 0xf1005f8723ac9884,

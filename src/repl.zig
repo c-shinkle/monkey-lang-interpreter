@@ -7,59 +7,14 @@ const Environment = @import("Environment.zig");
 const evaluator = @import("evaluator.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
+const anyline = @import("anyline");
+const readline = @cImport({
+    @cInclude("stdio.h");
+    @cInclude("readline/readline.h");
+    @cInclude("readline/history.h");
+});
 
-pub fn stdInRepl() !void {
-    var stdin_buffer: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().readerStreaming(&stdin_buffer);
-
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writerStreaming(&stdout_buffer);
-    defer {
-        stdout_writer.interface.writeAll("Bye bye!\n") catch {};
-        stdout_writer.interface.flush() catch {};
-    }
-
-    try stdout_writer.interface.writeAll("Hello! This is the Monkey Programming Language!\n");
-    try stdout_writer.interface.writeAll("Feel free to type in commands!\n");
-    try stdout_writer.interface.writeAll(">> ");
-    try stdout_writer.interface.flush();
-
-    var env_alloc = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
-    defer env_alloc.deinit();
-    var env = Environment.init(env_alloc.allocator());
-
-    while (true) : ({
-        try stdout_writer.interface.writeAll("\n>> ");
-        try stdout_writer.interface.flush();
-    }) {
-        var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
-        defer arena.deinit();
-
-        const input = stdin_reader.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
-            error.EndOfStream => return stdout_writer.interface.writeByte('\n'),
-            else => return err,
-        };
-        if (std.mem.eql(u8, input, ".exit")) {
-            return;
-        }
-
-        var lexer = Lexer.init(input);
-        var parser = try Parser.init(&lexer, arena.allocator());
-        const program = try parser.parseProgram(arena.allocator());
-        if (program.statements.len > 0) {
-            const parent_node = ast.Node{ .program = program };
-            if (try evaluator.eval(arena.allocator(), parent_node, &env)) |evaluated| {
-                try evaluated.inspect(&stdout_writer.interface);
-            }
-        } else {
-            for (parser.errors.items) |err| {
-                try stdout_writer.interface.print("\t{s}\n", .{err});
-            }
-        }
-    }
-}
-
-pub fn libraryRepl(library: anytype) !void {
+pub fn readlineRepl() !void {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_temp = std.fs.File.stdout().writerStreaming(&stdout_buffer);
     var stdout_writer = &stdout_temp.interface;
@@ -77,26 +32,28 @@ pub fn libraryRepl(library: anytype) !void {
     const env_arena = env_allocator.allocator();
     var env = Environment.init(env_arena);
 
-    const history_path = try findHistoryPath(env_arena);
+    const history_path_slice = try findHistoryPath(env_arena);
+    var history_path_z = try env_arena.realloc(history_path_slice, history_path_slice.len + 1);
+    history_path_z[history_path_z.len - 1] = 0;
     defer {
-        const write_errno = library.write_history(history_path);
+        const write_errno = readline.write_history(history_path_z.ptr);
         if (write_errno != 0) {
             const fmt = "Failed to write history! Received errno {d}\n";
             std.debug.print(fmt, .{write_errno});
         }
     }
-    const read_errno = library.read_history(history_path);
+    const read_errno = readline.read_history(history_path_z.ptr);
     if (read_errno != 0) {
         const fmt = "Failed to write history! Received errno {d}\n";
         std.debug.print(fmt, .{read_errno});
     }
 
     while (true) : (try stdout_writer.flush()) {
-        const raw_input = library.readline(">> ") orelse return;
+        const raw_input = readline.readline(">> ") orelse return;
         const slice_input = std.mem.span(raw_input);
         if (std.mem.eql(u8, slice_input, ".exit")) return;
         if (slice_input.len == 0) continue;
-        _ = library.add_history(raw_input);
+        _ = readline.add_history(raw_input);
 
         var loop_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer loop_allocator.deinit();
@@ -119,7 +76,7 @@ pub fn libraryRepl(library: anytype) !void {
     }
 }
 
-fn findHistoryPath(alloc: std.mem.Allocator) ![*c]const u8 {
+fn findHistoryPath(alloc: std.mem.Allocator) ![]u8 {
     const home_path = switch (builtin.os.tag) {
         .macos, .linux => try std.process.getEnvVarOwned(alloc, "HOME"),
         else => return error.UnsupportedOS,
@@ -140,7 +97,7 @@ fn findHistoryPath(alloc: std.mem.Allocator) ![*c]const u8 {
 
     var buf: [std.fs.max_path_bytes:0]u8 = undefined;
     const history_filename = try home_dir.realpathZ(file_name, &buf);
-    return try alloc.dupeZ(u8, history_filename);
+    return try alloc.dupe(u8, history_filename);
 }
 
 pub fn fileInterpreter(relative_path: []const u8) !void {
@@ -181,4 +138,56 @@ pub fn fileInterpreter(relative_path: []const u8) !void {
             try stdout_writer.print("\t{s}\n", .{err});
         }
     }
+}
+
+pub fn anylineRepl() !void {
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_temp = std.fs.File.stdout().writerStreaming(&stdout_buffer);
+    var stdout_writer = &stdout_temp.interface;
+    defer {
+        stdout_writer.writeAll("Bye bye!\n") catch {};
+        stdout_writer.flush() catch {};
+    }
+
+    try stdout_writer.writeAll("Hello! This is the Monkey Programming Language!\n");
+    try stdout_writer.writeAll("Feel free to type in commands!\n");
+    try stdout_writer.flush();
+
+    var env_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+    defer env_allocator.deinit();
+    const env_arena = env_allocator.allocator();
+    var env = Environment.init(env_arena);
+
+    anyline.using_history();
+
+    const history_path = findHistoryPath(env_arena) catch null;
+    try anyline.read_history(env_arena, history_path);
+
+    while (true) : (try stdout_writer.flush()) {
+        var loop_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+        defer loop_allocator.deinit();
+        const loop_arena = loop_allocator.allocator();
+
+        const slice_input = try anyline.readline(loop_arena, ">> ");
+        if (std.mem.eql(u8, slice_input, ".exit")) break;
+        if (slice_input.len == 0) continue;
+        try anyline.add_history(env_arena, slice_input);
+
+        var lexer = Lexer.init(slice_input);
+        var parser = try Parser.init(&lexer, loop_arena);
+        const program = try parser.parseProgram(loop_arena);
+        if (program.statements.len > 0) {
+            const parent_node = ast.Node{ .program = program };
+            if (try evaluator.eval(loop_arena, parent_node, &env)) |evaluated| {
+                try evaluated.inspect(stdout_writer);
+                try stdout_writer.writeByte('\n');
+            }
+        } else {
+            for (parser.errors.items) |err| {
+                try stdout_writer.print("\t{s}\n", .{err});
+            }
+        }
+    }
+
+    try anyline.write_history(env_arena, history_path);
 }
