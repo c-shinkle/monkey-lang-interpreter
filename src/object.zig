@@ -1,7 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const AnyWriter = std.io.AnyWriter;
 
 const ast = @import("ast.zig");
 const builtins = @import("_builtin.zig");
@@ -9,7 +8,7 @@ const Environment = @import("Environment.zig");
 
 const ObjectType = []const u8;
 
-pub const ObjectError = AnyWriter.Error;
+pub const ObjectError = std.Io.Writer.Error;
 
 pub const INTEGER_OBJ = "INTEGER";
 pub const BOOLEAN_OBJ = "BOOLEAN";
@@ -53,7 +52,7 @@ pub const Object = union(enum) {
         };
     }
 
-    pub fn inspect(self: Object, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: Object, writer: *std.Io.Writer) ObjectError!void {
         switch (self) {
             inline else => |obj| try obj.inspect(writer),
         }
@@ -110,7 +109,7 @@ pub const Object = union(enum) {
 pub const Integer = struct {
     value: i64,
 
-    pub fn inspect(self: *const Integer, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Integer, writer: *std.Io.Writer) ObjectError!void {
         return try writer.print("{d}", .{self.value});
     }
 
@@ -134,7 +133,7 @@ pub const Integer = struct {
 pub const Boolean = struct {
     value: bool,
 
-    pub fn inspect(self: *const Boolean, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Boolean, writer: *std.Io.Writer) ObjectError!void {
         try writer.print("{any}", .{self.value});
     }
 
@@ -156,7 +155,7 @@ pub const Boolean = struct {
 };
 
 pub const Null = struct {
-    pub fn inspect(_: *const Null, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(_: *const Null, writer: *std.Io.Writer) ObjectError!void {
         try writer.print("null", .{});
     }
 
@@ -168,7 +167,7 @@ pub const Null = struct {
 pub const ReturnValue = struct {
     value: ?*Object,
 
-    pub fn inspect(self: *const ReturnValue, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const ReturnValue, writer: *std.Io.Writer) ObjectError!void {
         if (self.value) |value| try value.inspect(writer) else try writer.writeAll("null");
     }
 
@@ -186,7 +185,7 @@ pub const ReturnValue = struct {
 pub const Error = struct {
     message: []const u8,
 
-    pub fn inspect(self: *const Error, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Error, writer: *std.Io.Writer) ObjectError!void {
         try writer.print("ERROR: {s}", .{self.message});
     }
 
@@ -200,7 +199,7 @@ pub const Function = struct {
     body: ast.BlockStatement,
     env: *Environment,
 
-    pub fn inspect(self: *const Function, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Function, writer: *std.Io.Writer) ObjectError!void {
         try writer.writeAll("fn(");
 
         if (self.parameters.len > 0) {
@@ -239,7 +238,7 @@ pub const Function = struct {
 pub const String = struct {
     value: []const u8,
 
-    pub fn inspect(self: *const String, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const String, writer: *std.Io.Writer) ObjectError!void {
         return try writer.print("{s}", .{self.value});
     }
 
@@ -264,7 +263,7 @@ pub const String = struct {
 pub const Builtin = struct {
     _fn: builtins.BuiltinFnPointer,
 
-    pub fn inspect(_: *const Builtin, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(_: *const Builtin, writer: *std.Io.Writer) ObjectError!void {
         return try writer.writeAll("builtin function");
     }
 
@@ -276,7 +275,7 @@ pub const Builtin = struct {
 pub const Array = struct {
     elements: []Object,
 
-    pub fn inspect(self: *const Array, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Array, writer: *std.Io.Writer) ObjectError!void {
         try writer.writeByte('[');
 
         if (self.elements.len > 0) {
@@ -304,7 +303,7 @@ pub const Array = struct {
 pub const Hash = struct {
     pairs: Object.HashMap(Object),
 
-    pub fn inspect(self: *const Hash, writer: AnyWriter) ObjectError!void {
+    pub fn inspect(self: *const Hash, writer: *std.Io.Writer) ObjectError!void {
         try writer.writeByte('{');
 
         var iter = self.pairs.iterator();
@@ -352,14 +351,14 @@ test "Object inspect" {
         }, .expected = "null" },
     };
 
-    var array_list = std.ArrayListUnmanaged(u8).empty;
-    defer array_list.deinit(testing.allocator);
-    const writer = array_list.writer(testing.allocator).any();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var allocating = std.Io.Writer.Allocating.init(arena.allocator());
+    const writer = &allocating.writer;
     for (object_tests) |object_test| {
         try object_test.object.inspect(writer);
-        try testing.expectEqualStrings(object_test.expected, array_list.items);
-
-        array_list.clearRetainingCapacity();
+        try testing.expectEqualStrings(object_test.expected, try allocating.toOwnedSlice());
     }
 }
 

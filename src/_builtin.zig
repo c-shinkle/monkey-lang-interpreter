@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const evaluator = @import("evaluator.zig");
 const obj = @import("object.zig");
 
-pub const BuiltinError = std.fmt.AllocPrintError || obj.ObjectError;
+pub const BuiltinError = Allocator.Error || obj.ObjectError;
 
 pub const BuiltinFnPointer = *const fn (
     alloc: Allocator,
@@ -111,13 +111,14 @@ fn push(alloc: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
 }
 
 fn puts(_: Allocator, args: []const obj.Object) BuiltinError!obj.Object {
-    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer().any());
-    defer stdout_buffer.flush() catch std.debug.print("Failed to flush stdout_buffer!\n", .{});
-    const buffer_writer = stdout_buffer.writer().any();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_temp = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = &stdout_temp.interface;
+    defer stdout_writer.flush() catch std.debug.print("Failed to flush stdout_buffer!\n", .{});
 
     for (args) |arg| {
-        try arg.inspect(buffer_writer);
-        try buffer_writer.writeByte('\n');
+        try arg.inspect(stdout_writer);
+        try stdout_writer.writeByte('\n');
     }
     return obj.NULL;
 }

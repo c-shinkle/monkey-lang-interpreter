@@ -16,7 +16,7 @@ const ParserError = error{
     MissingColon,
     UnknownPrefixToken,
     UnknownOperatorToken,
-} || Allocator.Error || std.fmt.AllocPrintError || std.fmt.ParseIntError;
+} || Allocator.Error || std.fmt.ParseIntError;
 
 const PrefixParseFn = *const fn (self: *Parser, alloc: Allocator) ParserError!Expression;
 const InfixParseFn = *const fn (
@@ -876,7 +876,7 @@ test "Infix Expression" {
 }
 
 test "Operator Precedence" {
-    const string_tests = .{
+    const string_tests = [_]struct { []const u8, []const u8 }{
         .{
             "-a * b",
             "((-a) * b)",
@@ -990,9 +990,9 @@ test "Operator Precedence" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var array_list = std.ArrayList(u8).init(arena.allocator());
-    const writer = array_list.writer().any();
-    inline for (string_tests) |string_test| {
+    var allocating = std.Io.Writer.Allocating.init(arena.allocator());
+    const writer = &allocating.writer;
+    for (string_tests) |string_test| {
         const input, const expected = string_test;
         var lexer = Lexer.init(input);
         var parser = try Parser.init(&lexer, arena.allocator());
@@ -1000,9 +1000,8 @@ test "Operator Precedence" {
         try checkParserErrors(&parser);
 
         try program.string(writer);
-        try testing.expectEqualStrings(expected, array_list.items);
 
-        array_list.clearRetainingCapacity();
+        try testing.expectEqualStrings(expected, try allocating.toOwnedSlice());
     }
 }
 

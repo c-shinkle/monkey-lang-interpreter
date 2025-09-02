@@ -13,7 +13,7 @@ const Token = @import("Token.zig");
 const getLiteralByOperator = Token.getLiteralByOperator;
 const Operator = Token.Operator;
 
-const EvalError = _builtin.BuiltinError || Allocator.Error || std.fmt.AllocPrintError;
+const EvalError = _builtin.BuiltinError || Allocator.Error || std.fmt.ParseIntError;
 
 pub fn eval(alloc: Allocator, parent_node: ast.Node, env: *Environment) EvalError!?obj.Object {
     return switch (parent_node) {
@@ -281,11 +281,7 @@ fn isTruthy(maybe_object: ?obj.Object) bool {
     } else true;
 }
 
-pub fn newError(
-    alloc: Allocator,
-    comptime fmt: []const u8,
-    args: anytype,
-) std.fmt.AllocPrintError!obj.Object {
+pub fn newError(alloc: Allocator, comptime fmt: []const u8, args: anytype) Allocator.Error!obj.Object {
     const message = try std.fmt.allocPrint(alloc, fmt, args);
     return obj.Object{ ._error = obj.Error{ .message = message } };
 }
@@ -750,15 +746,14 @@ test "Function Object" {
 
     try testing.expectEqual(1, function.parameters.len);
 
-    var array_list = std.ArrayListUnmanaged(u8).empty;
-    const writer = array_list.writer(arena.allocator()).any();
+    var allocating = std.Io.Writer.Allocating.init(arena.allocator());
+    const writer = &allocating.writer;
 
     try function.parameters[0].string(writer);
-    try testing.expectEqualStrings("x", array_list.items);
-    array_list.clearRetainingCapacity();
+    try testing.expectEqualStrings("x", try allocating.toOwnedSlice());
 
     try function.body.string(writer);
-    try testing.expectEqualStrings("(x + 2)", array_list.items);
+    try testing.expectEqualStrings("(x + 2)", try allocating.toOwnedSlice());
 }
 
 test "Function Application" {

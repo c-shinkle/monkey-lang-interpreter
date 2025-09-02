@@ -3,12 +3,12 @@
     .version = "0.1.0",
     .dependencies = .{
         .editline = .{
-            .url = "https://github.com/allyourcodebase/editline/archive/refs/tags/1.7.1-1.tar.gz",
-            .hash = "editline-1.17.1-SZoHiw0SAACO7MpMWO05xSzzgE5zjVSbzjuGylZq3r9z",
+            .url = "https://github.com/allyourcodebase/editline/archive/refs/tags/1.17.1-2.tar.gz",
+            .hash = "editline-1.17.1-SZoHiwwSAABNmzWWZFqX694f-YONeEsdMm0Fgay6LHVp",
         },
     },
     .fingerprint = 0xf1005f8723ac9884,
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.1",
     .paths = .{
         "build.zig",
         "build.zig.zon",

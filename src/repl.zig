@@ -9,71 +9,68 @@ const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
 
 pub fn stdInRepl() !void {
-    var stdin_reader = std.io.getStdIn().reader();
+    var stdin_buffer: [1024]u8 = undefined;
+    var stdin_reader = std.fs.File.stdin().readerStreaming(&stdin_buffer);
 
-    const size: usize = 4096;
-    var stream_buffer: [size]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&stream_buffer);
-
-    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-    const buffer_writer = stdout_buffer.writer();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writerStreaming(&stdout_buffer);
     defer {
-        buffer_writer.print("Bye bye!\n", .{}) catch {};
-        stdout_buffer.flush() catch {};
+        stdout_writer.interface.writeAll("Bye bye!\n") catch {};
+        stdout_writer.interface.flush() catch {};
     }
-    try buffer_writer.print("Hello! This is the Monkey Programming Language!\n", .{});
-    try buffer_writer.print("Feel free to type in commands!\n", .{});
-    try stdout_buffer.flush();
+
+    try stdout_writer.interface.writeAll("Hello! This is the Monkey Programming Language!\n");
+    try stdout_writer.interface.writeAll("Feel free to type in commands!\n");
+    try stdout_writer.interface.writeAll(">> ");
+    try stdout_writer.interface.flush();
 
     var env_alloc = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
     defer env_alloc.deinit();
     var env = Environment.init(env_alloc.allocator());
 
-    try buffer_writer.print(">> ", .{});
-    try stdout_buffer.flush();
     while (true) : ({
-        try buffer_writer.print(">> ", .{});
-        try stdout_buffer.flush();
-        stream.reset();
+        try stdout_writer.interface.writeAll("\n>> ");
+        try stdout_writer.interface.flush();
     }) {
-        stdin_reader.streamUntilDelimiter(stream.writer(), '\n', size) catch |e| return switch (e) {
-            error.EndOfStream => try buffer_writer.writeByte('\n'),
-            else => e,
+        var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+        defer arena.deinit();
+
+        const input = stdin_reader.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
+            error.EndOfStream => return stdout_writer.interface.writeByte('\n'),
+            else => return err,
         };
-        if (std.mem.eql(u8, stream.getWritten(), ".exit")) {
+        if (std.mem.eql(u8, input, ".exit")) {
             return;
         }
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
-        defer arena.deinit();
-        var lexer = Lexer.init(stream.getWritten());
+        var lexer = Lexer.init(input);
         var parser = try Parser.init(&lexer, arena.allocator());
         const program = try parser.parseProgram(arena.allocator());
         if (program.statements.len > 0) {
             const parent_node = ast.Node{ .program = program };
             if (try evaluator.eval(arena.allocator(), parent_node, &env)) |evaluated| {
-                try evaluated.inspect(buffer_writer.any());
-                try buffer_writer.writeByte('\n');
+                try evaluated.inspect(&stdout_writer.interface);
             }
         } else {
             for (parser.errors.items) |err| {
-                try buffer_writer.print("\t{s}\n", .{err});
+                try stdout_writer.interface.print("\t{s}\n", .{err});
             }
         }
     }
 }
 
 pub fn libraryRepl(library: anytype) !void {
-    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-    const buffer_writer = stdout_buffer.writer().any();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_temp = std.fs.File.stdout().writerStreaming(&stdout_buffer);
+    var stdout_writer = &stdout_temp.interface;
     defer {
-        buffer_writer.print("Bye bye!\n", .{}) catch {};
-        stdout_buffer.flush() catch {};
+        stdout_writer.writeAll("Bye bye!\n") catch {};
+        stdout_writer.flush() catch {};
     }
 
-    try buffer_writer.print("Hello! This is the Monkey Programming Language!\n", .{});
-    try buffer_writer.print("Feel free to type in commands!\n", .{});
-    try stdout_buffer.flush();
+    try stdout_writer.writeAll("Hello! This is the Monkey Programming Language!\n");
+    try stdout_writer.writeAll("Feel free to type in commands!\n");
+    try stdout_writer.flush();
 
     var env_allocator = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
     defer env_allocator.deinit();
@@ -88,9 +85,13 @@ pub fn libraryRepl(library: anytype) !void {
             std.debug.print(fmt, .{write_errno});
         }
     }
-    _ = library.read_history(history_path);
+    const read_errno = library.read_history(history_path);
+    if (read_errno != 0) {
+        const fmt = "Failed to write history! Received errno {d}\n";
+        std.debug.print(fmt, .{read_errno});
+    }
 
-    while (true) : (try stdout_buffer.flush()) {
+    while (true) : (try stdout_writer.flush()) {
         const raw_input = library.readline(">> ") orelse return;
         const slice_input = std.mem.span(raw_input);
         if (std.mem.eql(u8, slice_input, ".exit")) return;
@@ -107,12 +108,12 @@ pub fn libraryRepl(library: anytype) !void {
         if (program.statements.len > 0) {
             const parent_node = ast.Node{ .program = program };
             if (try evaluator.eval(loop_arena, parent_node, &env)) |evaluated| {
-                try evaluated.inspect(buffer_writer);
-                try buffer_writer.writeByte('\n');
+                try evaluated.inspect(stdout_writer);
+                try stdout_writer.writeByte('\n');
             }
         } else {
             for (parser.errors.items) |err| {
-                try buffer_writer.print("\t{s}\n", .{err});
+                try stdout_writer.print("\t{s}\n", .{err});
             }
         }
     }
@@ -155,26 +156,29 @@ pub fn fileInterpreter(relative_path: []const u8) !void {
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    const read_bytes = try file.readToEndAlloc(arena, std.math.maxInt(usize));
+    var buffer: [1024]u8 = undefined;
+    var reader = file.readerStreaming(&buffer);
+    const read_bytes = try reader.interface.allocRemaining(arena, .unlimited);
 
     var lexer = Lexer.init(read_bytes);
     var parser = try Parser.init(&lexer, arena);
     const program = try parser.parseProgram(arena);
 
-    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-    defer stdout_buffer.flush() catch {};
-    const buffer_writer = stdout_buffer.writer().any();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_temp = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = &stdout_temp.interface;
+    defer stdout_writer.flush() catch {};
 
     if (program.statements.len > 0) {
         const parent_node = ast.Node{ .program = program };
         var env = Environment.init(arena);
         if (try evaluator.eval(arena, parent_node, &env)) |evaluated| {
-            try evaluated.inspect(buffer_writer);
-            try buffer_writer.writeByte('\n');
+            try evaluated.inspect(stdout_writer);
+            try stdout_writer.writeByte('\n');
         }
     } else {
         for (parser.errors.items) |err| {
-            try buffer_writer.print("\t{s}\n", .{err});
+            try stdout_writer.print("\t{s}\n", .{err});
         }
     }
 }
